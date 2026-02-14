@@ -47,8 +47,6 @@ export function FingerSelector({ fingerStatus, onChange, onConfirm }: FingerSele
     onChange({ ...fingerStatus, [name]: next });
   }
 
-  const hasInjured = Object.values(fingerStatus).some((s) => s === 'injured');
-
   return (
     <div className="fixed inset-0 bg-gray-900/95 z-50 flex items-center justify-center p-6">
       <motion.div
@@ -166,13 +164,9 @@ export function FingerSelector({ fingerStatus, onChange, onConfirm }: FingerSele
 
         <button
           onClick={onConfirm}
-          className={`w-full rounded-xl py-3 font-semibold transition-all ${
-            hasInjured
-              ? 'bg-blue-600 text-white active:scale-[0.98]'
-              : 'bg-gray-200 text-gray-500'
-          }`}
+          className="w-full rounded-xl py-3 font-semibold transition-all bg-blue-600 text-white active:scale-[0.98]"
         >
-          {hasInjured ? 'Confirmar seleccion' : 'Continuar sin seleccion'}
+          Confirmar selección
         </button>
       </motion.div>
     </div>
