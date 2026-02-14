@@ -10,11 +10,14 @@ import { DashboardHeader } from '@/components/exercises/DashboardHeader';
 import { MetricsGrid } from '@/components/exercises/MetricsGrid';
 import { ExerciseDemo } from '@/components/exercises/ExerciseDemo';
 import { FingerSelector } from '@/components/exercises/FingerSelector';
+import { ExerciseSelector } from '@/components/exercises/ExerciseSelector';
 import { Home, Activity, Calendar, User, Hand } from 'lucide-react';
 import Link from 'next/link';
+import { EXERCISES, type Exercise } from '@/data/exercises';
 import {
   calculateWristAngle,
   calculateAllFingerAngles,
+  getExerciseAngle,
   drawHand,
   createRepCounter,
   updateRepCounter,
@@ -37,7 +40,7 @@ type Metrics = {
   lastRep: RepData | null;
 };
 
-type Phase = 'finger-select' | 'demo' | 'tracking';
+type Phase = 'exercise-select' | 'finger-select' | 'demo' | 'tracking';
 
 export default function Exercises() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -48,7 +51,8 @@ export default function Exercises() {
   const lastTimestampRef = useRef<number>(0);
   const repCounterRef = useRef<RepCounter>(createRepCounter());
 
-  const [phase, setPhase] = useState<Phase>('finger-select');
+  const [phase, setPhase] = useState<Phase>('exercise-select');
+  const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fingerStatus, setFingerStatus] = useState<FingerStatusMap>(DEFAULT_FINGER_STATUS);
@@ -103,7 +107,11 @@ export default function Exercises() {
 
         drawHand(ctx, landmarks, canvas.width, canvas.height, fingerStatusRef.current, fingerAngles);
 
-        const angle = calculateWristAngle(landmarks);
+        const angle = getExerciseAngle(
+          landmarks,
+          selectedExercise?.id || 'WRIST',
+          fingerStatusRef.current
+        );
         repCounterRef.current = updateRepCounter(repCounterRef.current, angle);
 
         const counter = repCounterRef.current;
@@ -242,6 +250,17 @@ export default function Exercises() {
 
   // --- Phase screens ---
 
+  if (phase === 'exercise-select') {
+    return (
+      <ExerciseSelector
+        onSelect={(exercise) => {
+          setSelectedExercise(exercise);
+          setPhase('finger-select');
+        }}
+      />
+    );
+  }
+
   if (phase === 'finger-select') {
     return (
       <FingerSelector
@@ -255,8 +274,9 @@ export default function Exercises() {
   if (phase === 'demo') {
     return (
       <ExerciseDemo
-        exerciseName="Flexion de Muneca"
-        description="Flexiona y extiende la muneca de forma controlada, completando el rango de movimiento."
+        exerciseName={selectedExercise?.name || 'Ejercicio'}
+        description={selectedExercise?.description || ''}
+        videoUrl={selectedExercise?.videoUrl}
         targetReps={TARGET_REPS}
         onStart={() => setPhase('tracking')}
       />
@@ -266,7 +286,7 @@ export default function Exercises() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <DashboardHeader
-        exerciseName="Flexion de Muneca"
+        exerciseName={selectedExercise?.name || 'Ejercicio'}
         dayInfo="Dia 3"
         phaseInfo="Fase Inicial"
       />

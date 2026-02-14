@@ -43,7 +43,8 @@ export type RepData = {
 export function calculateForearmPoint(landmarks: Point[]): Point {
   const wrist = landmarks[0];
   const middleMcp = landmarks[9];
-  const factor = 0.4;
+  // Factor increased to move the point further back on the forearm (almost elbow)
+  const factor = 1.2;
   return {
     x: wrist.x + (wrist.x - middleMcp.x) * factor,
     y: wrist.y + (wrist.y - middleMcp.y) * factor,
@@ -103,6 +104,29 @@ export function calculateAllFingerAngles(landmarks: Point[]): FingerAngles {
     angles[finger.name] = calculateFingerAngle(landmarks, finger);
   }
   return angles;
+}
+
+/**
+ * Calculates a representative angle based on the exercise type and finger status.
+ */
+export function getExerciseAngle(
+  landmarks: Point[],
+  exerciseId: string,
+  fingerStatus: FingerStatusMap
+): number {
+  if (exerciseId === 'WRIST') {
+    return calculateWristAngle(landmarks);
+  }
+
+  // For finger exercises, we track the average angle of injured fingers.
+  // If no fingers are marked as injured, we take the average of all fingers.
+  const fingerAngles = calculateAllFingerAngles(landmarks);
+  const injuredFingers = FINGERS.filter(f => fingerStatus[f.name] === 'injured');
+
+  const targetFingers = injuredFingers.length > 0 ? injuredFingers : FINGERS;
+
+  const sum = targetFingers.reduce((acc, f) => acc + fingerAngles[f.name], 0);
+  return sum / targetFingers.length;
 }
 
 // --- Finger connections for drawing ---

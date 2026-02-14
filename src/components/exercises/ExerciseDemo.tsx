@@ -8,8 +8,27 @@ type ExerciseDemoProps = {
   exerciseName: string;
   description: string;
   targetReps: number;
+  videoUrl?: string;
   onStart: () => void;
 };
+
+function VideoPlaceholder({ exerciseName }: { exerciseName: string }) {
+  return (
+    <div className="w-full aspect-video bg-gray-100 rounded-xl flex flex-col items-center justify-center border-2 border-dashed border-gray-200 p-6 text-center">
+      <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mb-3">
+        <Play className="w-6 h-6 text-blue-600 fill-blue-600" />
+      </div>
+      <h4 className="text-sm font-semibold text-gray-900 mb-1">Video Demostrativo</h4>
+      <p className="text-xs text-gray-500">
+        Espacio para el video de: <br />
+        <span className="font-medium text-blue-600">{exerciseName}</span>
+      </p>
+      <div className="mt-4 px-3 py-1 bg-gray-200 rounded text-[10px] text-gray-600 font-mono">
+        assets/videos/{exerciseName.toLowerCase().replace(/\s+/g, '-')}.mp4
+      </div>
+    </div>
+  );
+}
 
 function WristFlexionAnimation() {
   return (
@@ -52,6 +71,7 @@ export function ExerciseDemo({
   exerciseName,
   description,
   targetReps,
+  videoUrl,
   onStart,
 }: ExerciseDemoProps) {
   return (
@@ -66,8 +86,19 @@ export function ExerciseDemo({
           <p className="text-sm text-gray-500 mt-1">{description}</p>
         </div>
 
-        <div className="bg-gray-50 rounded-xl p-4 flex items-center justify-center">
-          <WristFlexionAnimation />
+        <div className="w-full">
+          {videoUrl ? (
+            <video
+              src={videoUrl}
+              className="w-full aspect-video rounded-xl object-cover bg-gray-100"
+              controls
+              autoPlay
+              loop
+              muted
+            />
+          ) : (
+            <VideoPlaceholder exerciseName={exerciseName} />
+          )}
         </div>
 
         <div className="flex items-center gap-4 text-sm text-gray-600">
