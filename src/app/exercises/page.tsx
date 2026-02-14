@@ -56,6 +56,7 @@ export default function Exercises() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fingerStatus, setFingerStatus] = useState<FingerStatusMap>(DEFAULT_FINGER_STATUS);
+  const [forearmReferenceVector, setForearmReferenceVector] = useState<Point | null>(null);
   const [showFingerSelector, setShowFingerSelector] = useState(false);
   const [metrics, setMetrics] = useState<Metrics>({
     rom: 0,
@@ -67,9 +68,11 @@ export default function Exercises() {
     lastRep: null,
   });
 
-  // Store fingerStatus in a ref so the detection loop always has the latest
+  // Store refs for the detection loop
   const fingerStatusRef = useRef(fingerStatus);
   fingerStatusRef.current = fingerStatus;
+  const forearmReferenceVectorRef = useRef(forearmReferenceVector);
+  forearmReferenceVectorRef.current = forearmReferenceVector;
 
   const detectHands = useCallback(() => {
     const step = () => {
@@ -103,14 +106,37 @@ export default function Exercises() {
 
       if (results.landmarks && results.landmarks.length > 0) {
         const landmarks = results.landmarks[0];
+
+        // Auto-calibrate forearm reference on first frame for wrist exercises
+        if (selectedExercise?.id === 'WRIST' && !forearmReferenceVectorRef.current) {
+          const wrist = landmarks[0];
+          const middleMcp = landmarks[9];
+          const v = {
+            x: wrist.x - middleMcp.x,
+            y: wrist.y - middleMcp.y,
+            z: wrist.z - middleMcp.z,
+          };
+          setForearmReferenceVector(v);
+          forearmReferenceVectorRef.current = v;
+        }
+
         const fingerAngles: FingerAngles = calculateAllFingerAngles(landmarks);
 
-        drawHand(ctx, landmarks, canvas.width, canvas.height, fingerStatusRef.current, fingerAngles);
+        drawHand(
+          ctx,
+          landmarks,
+          canvas.width,
+          canvas.height,
+          fingerStatusRef.current,
+          fingerAngles,
+          forearmReferenceVectorRef.current || undefined
+        );
 
         const angle = getExerciseAngle(
           landmarks,
           selectedExercise?.id || 'WRIST',
-          fingerStatusRef.current
+          fingerStatusRef.current,
+          forearmReferenceVectorRef.current || undefined
         );
         repCounterRef.current = updateRepCounter(repCounterRef.current, angle);
 
@@ -234,6 +260,14 @@ export default function Exercises() {
     };
   }, [phase, detectHands]);
 
+  // Reset calibration when exercise or phase changes
+  useEffect(() => {
+    if (phase === 'tracking') {
+      setForearmReferenceVector(null);
+      forearmReferenceVectorRef.current = null;
+    }
+  }, [phase, selectedExercise]);
+
   // Timer effect
   useEffect(() => {
     if (phase !== 'tracking') return;
@@ -330,19 +364,38 @@ export default function Exercises() {
 
             {/* Tracking status + finger selector button */}
             {!isLoading && !error && (
-              <div className="absolute top-3 left-3 flex items-center gap-2">
-                <div className="bg-black/50 backdrop-blur-sm rounded-lg px-3 py-1.5 flex items-center gap-2">
-                  <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-                  <span className="text-white text-xs font-medium">
-                    Tracking activo
-                  </span>
+              <div className="absolute top-3 left-3 flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="bg-black/50 backdrop-blur-sm rounded-lg px-3 py-1.5 flex items-center gap-2">
+                    <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                    <span className="text-white text-xs font-medium">
+                      Tracking activo
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setShowFingerSelector(true)}
+                    className="bg-black/50 backdrop-blur-sm rounded-lg p-1.5"
+                  >
+                    <Hand size={16} className="text-white" />
+                  </button>
+                  {selectedExercise?.id === 'WRIST' && (
+                    <button
+                      onClick={() => {
+                        setForearmReferenceVector(null);
+                        forearmReferenceVectorRef.current = null;
+                      }}
+                      className="bg-black/50 backdrop-blur-sm rounded-lg px-2 py-1.5 text-white text-[10px] font-bold"
+                    >
+                      RE-CALIBRAR
+                    </button>
+                  )}
                 </div>
-                <button
-                  onClick={() => setShowFingerSelector(true)}
-                  className="bg-black/50 backdrop-blur-sm rounded-lg p-1.5"
-                >
-                  <Hand size={16} className="text-white" />
-                </button>
+
+                {selectedExercise?.id === 'WRIST' && !forearmReferenceVector && (
+                  <div className="bg-blue-600/90 backdrop-blur-sm rounded-lg px-3 py-2 text-white text-xs animate-bounce">
+                    Alinea mano y antebrazo para calibrar
+                  </div>
+                )}
               </div>
             )}
           </div>
