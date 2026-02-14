@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import {
   FilesetResolver,
   HandLandmarker,
@@ -13,9 +13,8 @@ import { FingerSelector } from '@/components/exercises/FingerSelector';
 import { ExerciseSelector } from '@/components/exercises/ExerciseSelector';
 import { Home, Activity, Calendar, User, Hand } from 'lucide-react';
 import Link from 'next/link';
-import { EXERCISES, type Exercise } from '@/data/exercises';
+import { type Exercise } from '@/data/exercises';
 import {
-  calculateWristAngle,
   calculateAllFingerAngles,
   getExerciseAngle,
   drawHand,
@@ -26,6 +25,7 @@ import {
   type FingerAngles,
   type RepCounter,
   type RepData,
+  type Point,
 } from '@/lib/hand-tracking';
 
 const TARGET_REPS = 10;
@@ -68,11 +68,13 @@ export default function Exercises() {
     lastRep: null,
   });
 
-  // Store refs for the detection loop
+  // Store refs for the detection loop (updated in effect, not during render)
   const fingerStatusRef = useRef(fingerStatus);
-  fingerStatusRef.current = fingerStatus;
   const forearmReferenceVectorRef = useRef(forearmReferenceVector);
-  forearmReferenceVectorRef.current = forearmReferenceVector;
+  useEffect(() => {
+    fingerStatusRef.current = fingerStatus;
+    forearmReferenceVectorRef.current = forearmReferenceVector;
+  }, [fingerStatus, forearmReferenceVector]);
 
   const detectHands = useCallback(() => {
     const step = () => {
@@ -177,7 +179,7 @@ export default function Exercises() {
       animationFrameRef.current = requestAnimationFrame(step);
     };
     step();
-  }, []);
+  }, [selectedExercise?.id]);
 
   useEffect(() => {
     if (phase !== 'tracking') return;
@@ -260,14 +262,6 @@ export default function Exercises() {
     };
   }, [phase, detectHands]);
 
-  // Reset calibration when exercise or phase changes
-  useEffect(() => {
-    if (phase === 'tracking') {
-      setForearmReferenceVector(null);
-      forearmReferenceVectorRef.current = null;
-    }
-  }, [phase, selectedExercise]);
-
   // Timer effect
   useEffect(() => {
     if (phase !== 'tracking') return;
@@ -312,7 +306,11 @@ export default function Exercises() {
         description={selectedExercise?.description || ''}
         videoUrl={selectedExercise?.videoUrl}
         targetReps={TARGET_REPS}
-        onStart={() => setPhase('tracking')}
+        onStart={() => {
+          setForearmReferenceVector(null);
+          forearmReferenceVectorRef.current = null;
+          setPhase('tracking');
+        }}
       />
     );
   }

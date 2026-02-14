@@ -1,4 +1,4 @@
-type Point = { x: number; y: number; z: number };
+export type Point = { x: number; y: number; z: number };
 
 export type FingerName = 'pulgar' | 'indice' | 'medio' | 'anular' | 'menique';
 
