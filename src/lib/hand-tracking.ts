@@ -1,4 +1,4 @@
-type Point = { x: number; y: number; z: number };
+export type Point = { x: number; y: number; z: number };
 
 export type FingerName = 'pulgar' | 'indice' | 'medio' | 'anular' | 'menique';
 
@@ -40,23 +40,31 @@ export type RepData = {
 
 // --- Forearm reference point ---
 
-export function calculateForearmPoint(landmarks: Point[]): Point {
+export function calculateForearmPoint(landmarks: Point[], referenceVector?: Point): Point {
   const wrist = landmarks[0];
   const middleMcp = landmarks[9];
   // Factor increased to move the point further back on the forearm (almost elbow)
   const factor = 1.2;
+
+  // Use reference vector if provided (calibration), otherwise default to current hand orientation
+  const v = referenceVector || {
+    x: wrist.x - middleMcp.x,
+    y: wrist.y - middleMcp.y,
+    z: wrist.z - middleMcp.z,
+  };
+
   return {
-    x: wrist.x + (wrist.x - middleMcp.x) * factor,
-    y: wrist.y + (wrist.y - middleMcp.y) * factor,
-    z: wrist.z + (wrist.z - middleMcp.z) * factor,
+    x: wrist.x + v.x * factor,
+    y: wrist.y + v.y * factor,
+    z: wrist.z + v.z * factor,
   };
 }
 
 // --- Wrist angle using forearm reference ---
 
-export function calculateWristAngle(landmarks: Point[]): number {
+export function calculateWristAngle(landmarks: Point[], referenceVector?: Point): number {
   const wrist = landmarks[0];
-  const forearm = calculateForearmPoint(landmarks);
+  const forearm = calculateForearmPoint(landmarks, referenceVector);
   const middleMcp = landmarks[9];
 
   const v1 = { x: wrist.x - forearm.x, y: wrist.y - forearm.y };
@@ -112,10 +120,11 @@ export function calculateAllFingerAngles(landmarks: Point[]): FingerAngles {
 export function getExerciseAngle(
   landmarks: Point[],
   exerciseId: string,
-  fingerStatus: FingerStatusMap
+  fingerStatus: FingerStatusMap,
+  forearmReferenceVector?: Point
 ): number {
   if (exerciseId === 'WRIST') {
-    return calculateWristAngle(landmarks);
+    return calculateWristAngle(landmarks, forearmReferenceVector);
   }
 
   // For finger exercises, we track the average angle of injured fingers.
@@ -157,10 +166,11 @@ export function drawHand(
   width: number,
   height: number,
   fingerStatus: FingerStatusMap,
-  fingerAngles: FingerAngles
+  fingerAngles: FingerAngles,
+  forearmReferenceVector?: Point
 ) {
   // Draw forearm line
-  const forearm = calculateForearmPoint(landmarks);
+  const forearm = calculateForearmPoint(landmarks, forearmReferenceVector);
   const wrist = landmarks[0];
   ctx.beginPath();
   ctx.setLineDash([8, 4]);
