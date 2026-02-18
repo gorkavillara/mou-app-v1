@@ -40,14 +40,17 @@ export type RepData = {
 
 // --- Forearm reference point ---
 
-export function calculateForearmPoint(landmarks: Point[], referenceVector?: Point): Point {
+/**
+ * Computes a virtual forearm anchor point projected behind the wrist
+ * in the direction opposite to the hand. Call once at calibration time
+ * and store the returned absolute Point as the fixed anchor.
+ */
+export function calculateForearmPoint(landmarks: Point[]): Point {
   const wrist = landmarks[0];
   const middleMcp = landmarks[9];
-  // Factor increased to move the point further back on the forearm (almost elbow)
   const factor = 1.2;
 
-  // Use reference vector if provided (calibration), otherwise default to current hand orientation
-  const v = referenceVector || {
+  const v = {
     x: wrist.x - middleMcp.x,
     y: wrist.y - middleMcp.y,
     z: wrist.z - middleMcp.z,
@@ -60,48 +63,77 @@ export function calculateForearmPoint(landmarks: Point[], referenceVector?: Poin
   };
 }
 
-// --- Wrist angle using forearm reference ---
+// --- Wrist angle using fixed forearm anchor ---
 
-export function calculateWristAngle(landmarks: Point[], referenceVector?: Point): number {
+/**
+ * Measures the angle between the forearm axis (anchor→wrist) and the hand
+ * axis (wrist→middleMCP). When `forearmAnchor` is provided it is treated as
+ * a fixed world point so the angle genuinely changes as the wrist flexes /
+ * extends. Without it the point is recomputed each frame from the current
+ * landmarks (no angle will be produced because both vectors stay parallel).
+ */
+export function calculateWristAngle(landmarks: Point[], forearmAnchor?: Point): number {
   const wrist = landmarks[0];
-  const forearm = calculateForearmPoint(landmarks, referenceVector);
   const middleMcp = landmarks[9];
 
-  const v1 = { x: wrist.x - forearm.x, y: wrist.y - forearm.y };
-  const v2 = { x: middleMcp.x - wrist.x, y: middleMcp.y - wrist.y };
+  // Use the fixed anchor when available; fall back to dynamic for preview only
+  const forearm = forearmAnchor ?? calculateForearmPoint(landmarks);
 
-  const dot = v1.x * v2.x + v1.y * v2.y;
-  const mag1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y);
-  const mag2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y);
+  // 3D vectors for accuracy across rotations
+  const v1 = {
+    x: wrist.x - forearm.x,
+    y: wrist.y - forearm.y,
+    z: wrist.z - forearm.z,
+  };
+  const v2 = {
+    x: middleMcp.x - wrist.x,
+    y: middleMcp.y - wrist.y,
+    z: middleMcp.z - wrist.z,
+  };
+
+  const dot = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
+  const mag1 = Math.sqrt(v1.x ** 2 + v1.y ** 2 + v1.z ** 2);
+  const mag2 = Math.sqrt(v2.x ** 2 + v2.y ** 2 + v2.z ** 2);
 
   if (mag1 === 0 || mag2 === 0) return 0;
 
   const cosAngle = Math.max(-1, Math.min(1, dot / (mag1 * mag2)));
-  const angle = Math.acos(cosAngle) * (180 / Math.PI);
+  // acos gives 0-180°; subtract 180° so neutral (collinear) → 0°
+  const angle = Math.acos(cosAngle) * (180 / Math.PI) - 180;
 
+  // Sign via 2D cross product (flexion positive, extension negative)
   const cross = v1.x * v2.y - v1.y * v2.x;
-  return cross > 0 ? angle : -angle;
+  return cross > 0 ? -angle : angle;
 }
 
 // --- Per-finger angle calculation ---
 
+/**
+ * Measures the MCP joint angle in 3D space.
+ * v1: metacarpal direction (wrist→MCP)
+ * v2: proximal phalanx direction (MCP→PIP)
+ * At full extension the vectors are collinear → 0°.
+ * Flexion produces a positive angle; hyperextension a negative one.
+ */
 export function calculateFingerAngle(landmarks: Point[], finger: FingerConfig): number {
   const wrist = landmarks[0];
   const mcp = landmarks[finger.mcpIndex];
-  const tip = landmarks[finger.tipIndex];
+  const pip = landmarks[finger.pipIndex];
 
-  const v1 = { x: mcp.x - wrist.x, y: mcp.y - wrist.y };
-  const v2 = { x: tip.x - mcp.x, y: tip.y - mcp.y };
+  const v1 = { x: mcp.x - wrist.x, y: mcp.y - wrist.y, z: mcp.z - wrist.z };
+  const v2 = { x: pip.x - mcp.x, y: pip.y - mcp.y, z: pip.z - mcp.z };
 
-  const dot = v1.x * v2.x + v1.y * v2.y;
-  const mag1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y);
-  const mag2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y);
+  const dot = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
+  const mag1 = Math.sqrt(v1.x ** 2 + v1.y ** 2 + v1.z ** 2);
+  const mag2 = Math.sqrt(v2.x ** 2 + v2.y ** 2 + v2.z ** 2);
 
   if (mag1 === 0 || mag2 === 0) return 0;
 
   const cosAngle = Math.max(-1, Math.min(1, dot / (mag1 * mag2)));
+  // Neutral (straight) → acos(1) = 0°; no offset needed here
   const angle = Math.acos(cosAngle) * (180 / Math.PI);
 
+  // Sign: cross product in 2D projection – flexion positive
   const cross = v1.x * v2.y - v1.y * v2.x;
   return cross > 0 ? angle : -angle;
 }
@@ -121,10 +153,10 @@ export function getExerciseAngle(
   landmarks: Point[],
   exerciseId: string,
   fingerStatus: FingerStatusMap,
-  forearmReferenceVector?: Point
+  forearmAnchor?: Point
 ): number {
   if (exerciseId === 'WRIST') {
-    return calculateWristAngle(landmarks, forearmReferenceVector);
+    return calculateWristAngle(landmarks, forearmAnchor);
   }
 
   // For finger exercises, we track the average angle of injured fingers.
@@ -167,10 +199,10 @@ export function drawHand(
   height: number,
   fingerStatus: FingerStatusMap,
   fingerAngles: FingerAngles,
-  forearmReferenceVector?: Point
+  forearmAnchor?: Point
 ) {
-  // Draw forearm line
-  const forearm = calculateForearmPoint(landmarks, forearmReferenceVector);
+  // Draw forearm line – use fixed anchor when available, else dynamic fallback
+  const forearm = forearmAnchor ?? calculateForearmPoint(landmarks);
   const wrist = landmarks[0];
   ctx.beginPath();
   ctx.setLineDash([8, 4]);

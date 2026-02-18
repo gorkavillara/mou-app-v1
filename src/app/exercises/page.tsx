@@ -16,6 +16,7 @@ import Link from 'next/link';
 import { type Exercise } from '@/data/exercises';
 import {
   calculateAllFingerAngles,
+  calculateForearmPoint,
   getExerciseAngle,
   drawHand,
   createRepCounter,
@@ -56,7 +57,7 @@ export default function Exercises() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fingerStatus, setFingerStatus] = useState<FingerStatusMap>(DEFAULT_FINGER_STATUS);
-  const [forearmReferenceVector, setForearmReferenceVector] = useState<Point | null>(null);
+  const [forearmAnchorPoint, setForearmAnchorPoint] = useState<Point | null>(null);
   const [showFingerSelector, setShowFingerSelector] = useState(false);
   const [metrics, setMetrics] = useState<Metrics>({
     rom: 0,
@@ -70,11 +71,11 @@ export default function Exercises() {
 
   // Store refs for the detection loop (updated in effect, not during render)
   const fingerStatusRef = useRef(fingerStatus);
-  const forearmReferenceVectorRef = useRef(forearmReferenceVector);
+  const forearmAnchorPointRef = useRef(forearmAnchorPoint);
   useEffect(() => {
     fingerStatusRef.current = fingerStatus;
-    forearmReferenceVectorRef.current = forearmReferenceVector;
-  }, [fingerStatus, forearmReferenceVector]);
+    forearmAnchorPointRef.current = forearmAnchorPoint;
+  }, [fingerStatus, forearmAnchorPoint]);
 
   const detectHands = useCallback(() => {
     const step = () => {
@@ -109,17 +110,12 @@ export default function Exercises() {
       if (results.landmarks && results.landmarks.length > 0) {
         const landmarks = results.landmarks[0];
 
-        // Auto-calibrate forearm reference on first frame for wrist exercises
-        if (selectedExercise?.id === 'WRIST' && !forearmReferenceVectorRef.current) {
-          const wrist = landmarks[0];
-          const middleMcp = landmarks[9];
-          const v = {
-            x: wrist.x - middleMcp.x,
-            y: wrist.y - middleMcp.y,
-            z: wrist.z - middleMcp.z,
-          };
-          setForearmReferenceVector(v);
-          forearmReferenceVectorRef.current = v;
+        // Auto-calibrate forearm anchor on first frame for wrist exercises.
+        // We store the absolute position so it stays fixed while the hand moves.
+        if (selectedExercise?.id === 'WRIST' && !forearmAnchorPointRef.current) {
+          const anchor = calculateForearmPoint(landmarks);
+          setForearmAnchorPoint(anchor);
+          forearmAnchorPointRef.current = anchor;
         }
 
         const fingerAngles: FingerAngles = calculateAllFingerAngles(landmarks);
@@ -131,14 +127,14 @@ export default function Exercises() {
           canvas.height,
           fingerStatusRef.current,
           fingerAngles,
-          forearmReferenceVectorRef.current || undefined
+          forearmAnchorPointRef.current || undefined
         );
 
         const angle = getExerciseAngle(
           landmarks,
           selectedExercise?.id || 'WRIST',
           fingerStatusRef.current,
-          forearmReferenceVectorRef.current || undefined
+          forearmAnchorPointRef.current || undefined
         );
         repCounterRef.current = updateRepCounter(repCounterRef.current, angle);
 
@@ -307,8 +303,8 @@ export default function Exercises() {
         videoUrl={selectedExercise?.videoUrl}
         targetReps={TARGET_REPS}
         onStart={() => {
-          setForearmReferenceVector(null);
-          forearmReferenceVectorRef.current = null;
+          setForearmAnchorPoint(null);
+          forearmAnchorPointRef.current = null;
           setPhase('tracking');
         }}
       />
@@ -360,6 +356,20 @@ export default function Exercises() {
               style={{ transform: 'scaleX(-1)' }}
             />
 
+            {/* Rep counter overlay – top right */}
+            {!isLoading && !error && (
+              <div className="absolute top-3 right-3">
+                <div className="bg-black/60 backdrop-blur-sm rounded-2xl px-4 py-2 text-center min-w-[72px]">
+                  <div className="text-white font-bold text-4xl leading-none tabular-nums">
+                    {metrics.repetitions}
+                  </div>
+                  <div className="text-white/60 text-xs mt-0.5 font-medium">
+                    / {TARGET_REPS} reps
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Tracking status + finger selector button */}
             {!isLoading && !error && (
               <div className="absolute top-3 left-3 flex flex-col gap-2">
@@ -379,8 +389,8 @@ export default function Exercises() {
                   {selectedExercise?.id === 'WRIST' && (
                     <button
                       onClick={() => {
-                        setForearmReferenceVector(null);
-                        forearmReferenceVectorRef.current = null;
+                        setForearmAnchorPoint(null);
+                        forearmAnchorPointRef.current = null;
                       }}
                       className="bg-black/50 backdrop-blur-sm rounded-lg px-2 py-1.5 text-white text-[10px] font-bold"
                     >
@@ -389,7 +399,7 @@ export default function Exercises() {
                   )}
                 </div>
 
-                {selectedExercise?.id === 'WRIST' && !forearmReferenceVector && (
+                {selectedExercise?.id === 'WRIST' && !forearmAnchorPoint && (
                   <div className="bg-blue-600/90 backdrop-blur-sm rounded-lg px-3 py-2 text-white text-xs animate-bounce">
                     Alinea mano y antebrazo para calibrar
                   </div>
