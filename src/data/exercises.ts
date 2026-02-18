@@ -20,10 +20,4 @@ export const EXERCISES: Exercise[] = [
     description: 'Flexoextensión activa de dedos sin bloqueo de interfalángicas. Cierra el puño completamente y luego estira los dedos.',
     videoUrl: 'assets/videos/fe-activa-de-dedos-sin-bloqueo-de-ip.mp4',
   },
-  {
-    id: 'WRIST',
-    name: 'FE activa de muñeca',
-    description: 'Flexoextensión activa de muñeca. Mueve la mano hacia arriba y hacia abajo desde la muñeca.',
-    videoUrl: 'assets/videos/fe-activa-de-muneca.mp4',
-  },
 ];

@@ -20,7 +20,7 @@ export function Suggestions() {
             <h3 className="font-bold text-gray-900 mb-1">Mejora tu agarre</h3>
             <p className="text-gray-500 text-sm leading-relaxed mb-3">
               Notamos una ligera disminución en la fuerza de pinza. Prueba el
-              ejercicio "Pinza con Esponja".
+              ejercicio &quot;Pinza con Esponja&quot;.
             </p>
             <button className="text-blue-600 text-sm font-semibold flex items-center gap-1">
               Ver ejercicio <ArrowRight size={14} />

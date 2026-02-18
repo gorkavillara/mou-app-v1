@@ -69,6 +69,25 @@ export default function Exercises() {
     lastRep: null,
   });
 
+  // Load finger status from localStorage on mount
+  useEffect(() => {
+    const savedStatus = localStorage.getItem('fingerStatus');
+    if (savedStatus) {
+      try {
+        const parsed = JSON.parse(savedStatus);
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setFingerStatus(parsed);
+      } catch (e) {
+        console.error('Error loading finger status from localStorage', e);
+      }
+    }
+  }, []);
+
+  // Save finger status to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('fingerStatus', JSON.stringify(fingerStatus));
+  }, [fingerStatus]);
+
   // Store refs for the detection loop (updated in effect, not during render)
   const fingerStatusRef = useRef(fingerStatus);
   const forearmAnchorPointRef = useRef(forearmAnchorPoint);
