@@ -11,8 +11,8 @@ import { MetricsGrid } from '@/components/exercises/MetricsGrid';
 import { ExerciseDemo } from '@/components/exercises/ExerciseDemo';
 import { FingerSelector } from '@/components/exercises/FingerSelector';
 import { ExerciseSelector } from '@/components/exercises/ExerciseSelector';
-import { Home, Activity, Calendar, User, Hand } from 'lucide-react';
-import Link from 'next/link';
+import { Hand } from 'lucide-react';
+import { AppNav } from '@/components/AppNav';
 import { type Exercise } from '@/data/exercises';
 import {
   calculateAllFingerAngles,
@@ -129,9 +129,9 @@ export default function Exercises() {
       if (results.landmarks && results.landmarks.length > 0) {
         const landmarks = results.landmarks[0];
 
-        // Auto-calibrate forearm anchor on first frame for wrist exercises.
+        // Auto-calibrate forearm anchor on first detected frame for any exercise.
         // We store the absolute position so it stays fixed while the hand moves.
-        if (selectedExercise?.id === 'WRIST' && !forearmAnchorPointRef.current) {
+        if (!forearmAnchorPointRef.current) {
           const anchor = calculateForearmPoint(landmarks);
           setForearmAnchorPoint(anchor);
           forearmAnchorPointRef.current = anchor;
@@ -331,14 +331,15 @@ export default function Exercises() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex flex-col md:pl-[220px]">
+      <AppNav active="/exercises" />
       <DashboardHeader
         exerciseName={selectedExercise?.name || 'Ejercicio'}
         dayInfo="Dia 3"
         phaseInfo="Fase Inicial"
       />
 
-      <main className="flex-1 flex flex-col max-w-4xl mx-auto w-full pb-20">
+      <main className="flex-1 flex flex-col w-full pb-20 md:pb-0">
         {/* Camera Section */}
         <div className="relative bg-gray-900 flex-1 min-h-[50vh]">
           {isLoading && (
@@ -451,40 +452,6 @@ export default function Exercises() {
           onConfirm={() => setShowFingerSelector(false)}
         />
       )}
-
-      {/* Bottom Navigation Bar */}
-      <div className="fixed bottom-0 left-0 w-full bg-white/80 backdrop-blur-lg border-t border-gray-200 pb-safe pt-2 z-50">
-        <div className="max-w-md mx-auto flex justify-around items-center px-4 h-16">
-          <Link
-            href="/dashboard"
-            className="flex flex-col items-center gap-1 text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <Home size={24} strokeWidth={2} />
-            <span className="text-[10px] font-medium">Inicio</span>
-          </Link>
-          <Link
-            href="/exercises"
-            className="flex flex-col items-center gap-1 text-blue-600"
-          >
-            <Activity size={24} strokeWidth={2.5} />
-            <span className="text-[10px] font-medium">Ejercicios</span>
-          </Link>
-          <Link
-            href="/report"
-            className="flex flex-col items-center gap-1 text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <Calendar size={24} strokeWidth={2} />
-            <span className="text-[10px] font-medium">Informe</span>
-          </Link>
-          <Link
-            href="/profile"
-            className="flex flex-col items-center gap-1 text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <User size={24} strokeWidth={2} />
-            <span className="text-[10px] font-medium">Perfil</span>
-          </Link>
-        </div>
-      </div>
     </div>
   );
 }

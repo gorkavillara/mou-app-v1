@@ -269,7 +269,10 @@ export function drawHand(
     ctx.stroke();
   });
 
-  // Draw FE range labels above injured/tracked fingers
+  // Draw FE range labels above injured/tracked fingers.
+  // The canvas element has CSS scaleX(-1) applied, so text drawn normally
+  // would appear mirrored. We counter-flip the context around the label
+  // position so the text reads correctly for the patient.
   for (const finger of FINGERS) {
     if (fingerStatus[finger.name] !== 'injured') continue;
 
@@ -280,17 +283,24 @@ export function drawHand(
     const x = tip.x * width;
     const y = tip.y * height - 18;
 
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    const textWidth = ctx.measureText(label).width + 10;
-    ctx.beginPath();
-    ctx.roundRect(x - textWidth / 2, y - 10, textWidth, 20, 4);
-    ctx.fill();
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(-1, 1); // compensate for CSS scaleX(-1) on the canvas element
 
-    ctx.fillStyle = '#F97316';
     ctx.font = 'bold 12px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(label, x, y);
+
+    const textWidth = ctx.measureText(label).width + 10;
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.beginPath();
+    ctx.roundRect(-textWidth / 2, -10, textWidth, 20, 4);
+    ctx.fill();
+
+    ctx.fillStyle = '#F97316';
+    ctx.fillText(label, 0, 0);
+
+    ctx.restore();
   }
 }
 
