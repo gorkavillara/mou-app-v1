@@ -38,74 +38,6 @@ export type RepData = {
   maxExtension: number;
 };
 
-// --- Forearm reference point ---
-
-/**
- * Computes a virtual forearm anchor point projected behind the wrist
- * in the direction opposite to the hand. Call once at calibration time
- * and store the returned absolute Point as the fixed anchor.
- */
-export function calculateForearmPoint(landmarks: Point[]): Point {
-  const wrist = landmarks[0];
-  const middleMcp = landmarks[9];
-  const factor = 1.2;
-
-  const v = {
-    x: wrist.x - middleMcp.x,
-    y: wrist.y - middleMcp.y,
-    z: wrist.z - middleMcp.z,
-  };
-
-  return {
-    x: wrist.x + v.x * factor,
-    y: wrist.y + v.y * factor,
-    z: wrist.z + v.z * factor,
-  };
-}
-
-// --- Wrist angle using fixed forearm anchor ---
-
-/**
- * Measures the angle between the forearm axis (anchor→wrist) and the hand
- * axis (wrist→middleMCP). When `forearmAnchor` is provided it is treated as
- * a fixed world point so the angle genuinely changes as the wrist flexes /
- * extends. Without it the point is recomputed each frame from the current
- * landmarks (no angle will be produced because both vectors stay parallel).
- */
-export function calculateWristAngle(landmarks: Point[], forearmAnchor?: Point): number {
-  const wrist = landmarks[0];
-  const middleMcp = landmarks[9];
-
-  // Use the fixed anchor when available; fall back to dynamic for preview only
-  const forearm = forearmAnchor ?? calculateForearmPoint(landmarks);
-
-  // 3D vectors for accuracy across rotations
-  const v1 = {
-    x: wrist.x - forearm.x,
-    y: wrist.y - forearm.y,
-    z: wrist.z - forearm.z,
-  };
-  const v2 = {
-    x: middleMcp.x - wrist.x,
-    y: middleMcp.y - wrist.y,
-    z: middleMcp.z - wrist.z,
-  };
-
-  const dot = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
-  const mag1 = Math.sqrt(v1.x ** 2 + v1.y ** 2 + v1.z ** 2);
-  const mag2 = Math.sqrt(v2.x ** 2 + v2.y ** 2 + v2.z ** 2);
-
-  if (mag1 === 0 || mag2 === 0) return 0;
-
-  const cosAngle = Math.max(-1, Math.min(1, dot / (mag1 * mag2)));
-  // acos gives 0-180°; subtract 180° so neutral (collinear) → 0°
-  const angle = Math.acos(cosAngle) * (180 / Math.PI) - 180;
-
-  // Sign via 2D cross product (flexion positive, extension negative)
-  const cross = v1.x * v2.y - v1.y * v2.x;
-  return cross > 0 ? -angle : angle;
-}
-
 // --- Per-finger angle calculation ---
 
 /**
@@ -130,10 +62,8 @@ export function calculateFingerAngle(landmarks: Point[], finger: FingerConfig): 
   if (mag1 === 0 || mag2 === 0) return 0;
 
   const cosAngle = Math.max(-1, Math.min(1, dot / (mag1 * mag2)));
-  // Neutral (straight) → acos(1) = 0°; no offset needed here
   const angle = Math.acos(cosAngle) * (180 / Math.PI);
 
-  // Sign: cross product in 2D projection – flexion positive
   const cross = v1.x * v2.y - v1.y * v2.x;
   return cross > 0 ? angle : -angle;
 }
@@ -147,25 +77,16 @@ export function calculateAllFingerAngles(landmarks: Point[]): FingerAngles {
 }
 
 /**
- * Calculates a representative angle based on the exercise type and finger status.
+ * Returns the representative exercise angle based on the active fingers.
+ * Injured fingers are prioritised; falls back to the average of all fingers.
  */
 export function getExerciseAngle(
   landmarks: Point[],
-  exerciseId: string,
   fingerStatus: FingerStatusMap,
-  forearmAnchor?: Point
 ): number {
-  if (exerciseId === 'WRIST') {
-    return calculateWristAngle(landmarks, forearmAnchor);
-  }
-
-  // For finger exercises, we track the average angle of injured fingers.
-  // If no fingers are marked as injured, we take the average of all fingers.
   const fingerAngles = calculateAllFingerAngles(landmarks);
   const injuredFingers = FINGERS.filter(f => fingerStatus[f.name] === 'injured');
-
   const targetFingers = injuredFingers.length > 0 ? injuredFingers : FINGERS;
-
   const sum = targetFingers.reduce((acc, f) => acc + fingerAngles[f.name], 0);
   return sum / targetFingers.length;
 }
@@ -173,10 +94,10 @@ export function getExerciseAngle(
 // --- Finger connections for drawing ---
 
 export const FINGER_CONNECTIONS: Record<FingerName, [number, number][]> = {
-  pulgar: [[0, 1], [1, 2], [2, 3], [3, 4]],
-  indice: [[0, 5], [5, 6], [6, 7], [7, 8]],
-  medio: [[0, 9], [9, 10], [10, 11], [11, 12]],
-  anular: [[0, 13], [13, 14], [14, 15], [15, 16]],
+  pulgar:  [[0, 1],  [1, 2],   [2, 3],   [3, 4]],
+  indice:  [[0, 5],  [5, 6],   [6, 7],   [7, 8]],
+  medio:   [[0, 9],  [9, 10],  [10, 11], [11, 12]],
+  anular:  [[0, 13], [13, 14], [14, 15], [15, 16]],
   menique: [[0, 17], [17, 18], [18, 19], [19, 20]],
 };
 
@@ -186,118 +107,147 @@ export const PALM_CONNECTIONS: [number, number][] = [
 
 // --- Drawing utilities ---
 
-const FINGER_COLORS: Record<FingerStatus, string> = {
-  normal: '#3B82F6',
-  injured: '#F97316',
-  amputated: '#6B7280',
+const FINGER_LINE_COLOR: Record<FingerStatus, string> = {
+  normal:   '#22D3EE', // cyan-400
+  injured:  '#FB923C', // orange-400
+  amputated: '#6B7280', // gray-500
 };
 
+const POINT_COLOR: Record<FingerStatus, string> = {
+  normal:   '#67E8F9', // cyan-300 – slightly brighter for dots
+  injured:  '#FDBA74', // orange-300
+  amputated: '#9CA3AF', // gray-400
+};
+
+/**
+ * Maps a MediaPipe normalised landmark to canvas pixel coordinates,
+ * accounting for the `object-fit: cover` scaling applied to the video element.
+ */
+function toCanvas(
+  lm: { x: number; y: number },
+  videoW: number,
+  videoH: number,
+  canvasW: number,
+  canvasH: number,
+): { x: number; y: number } {
+  const scale = Math.max(canvasW / videoW, canvasH / videoH);
+  const offsetX = (canvasW - videoW * scale) / 2;
+  const offsetY = (canvasH - videoH * scale) / 2;
+  return {
+    x: lm.x * videoW * scale + offsetX,
+    y: lm.y * videoH * scale + offsetY,
+  };
+}
+
+/**
+ * Draws the hand skeleton on the given canvas context.
+ *
+ * @param videoWidth  Native width of the video stream (for cover-remap).
+ * @param videoHeight Native height of the video stream (for cover-remap).
+ */
 export function drawHand(
   ctx: CanvasRenderingContext2D,
   landmarks: Point[],
-  width: number,
-  height: number,
+  canvasWidth: number,
+  canvasHeight: number,
+  videoWidth: number,
+  videoHeight: number,
   fingerStatus: FingerStatusMap,
   fingerAngles: FingerAngles,
-  forearmAnchor?: Point
 ) {
-  // Draw forearm line – use fixed anchor when available, else dynamic fallback
-  const forearm = forearmAnchor ?? calculateForearmPoint(landmarks);
-  const wrist = landmarks[0];
-  ctx.beginPath();
-  ctx.setLineDash([8, 4]);
-  ctx.strokeStyle = '#A78BFA';
-  ctx.lineWidth = 3;
-  ctx.moveTo(forearm.x * width, forearm.y * height);
-  ctx.lineTo(wrist.x * width, wrist.y * height);
-  ctx.stroke();
+  const px = (lm: Point) =>
+    toCanvas(lm, videoWidth, videoHeight, canvasWidth, canvasHeight);
+
+  // Palm connections – subtle sky line
+  ctx.strokeStyle = '#0EA5E9';
+  ctx.lineWidth = 1.5;
   ctx.setLineDash([]);
-
-  // Draw forearm point
-  ctx.beginPath();
-  ctx.arc(forearm.x * width, forearm.y * height, 7, 0, 2 * Math.PI);
-  ctx.fillStyle = '#A78BFA';
-  ctx.fill();
-  ctx.strokeStyle = '#FFFFFF';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  // Draw palm connections
-  ctx.strokeStyle = '#3B82F6';
-  ctx.lineWidth = 3;
-  PALM_CONNECTIONS.forEach(([start, end]) => {
+  PALM_CONNECTIONS.forEach(([a, b]) => {
+    const start = px(landmarks[a]);
+    const end   = px(landmarks[b]);
     ctx.beginPath();
-    ctx.moveTo(landmarks[start].x * width, landmarks[start].y * height);
-    ctx.lineTo(landmarks[end].x * width, landmarks[end].y * height);
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
     ctx.stroke();
   });
 
-  // Draw each finger with its status color
+  // Finger connections
   const fingerNames = Object.keys(FINGER_CONNECTIONS) as FingerName[];
   for (const name of fingerNames) {
     const status = fingerStatus[name];
-    const connections = FINGER_CONNECTIONS[name];
-    const color = FINGER_COLORS[status];
+    const color  = FINGER_LINE_COLOR[status];
 
     ctx.strokeStyle = color;
-    ctx.lineWidth = status === 'injured' ? 4 : 3;
+    ctx.lineWidth = status === 'injured' ? 2 : 1.5;
 
     if (status === 'amputated') {
       ctx.setLineDash([4, 4]);
+    } else {
+      ctx.setLineDash([]);
     }
 
-    connections.forEach(([start, end]) => {
+    FINGER_CONNECTIONS[name].forEach(([a, b]) => {
+      const start = px(landmarks[a]);
+      const end   = px(landmarks[b]);
       ctx.beginPath();
-      ctx.moveTo(landmarks[start].x * width, landmarks[start].y * height);
-      ctx.lineTo(landmarks[end].x * width, landmarks[end].y * height);
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
       ctx.stroke();
     });
 
     ctx.setLineDash([]);
   }
 
-  // Draw landmark points
+  // Landmark dots – determine color per finger; wrist dot is neutral
+  const landmarkFingerMap: Record<number, FingerName> = {};
+  for (const finger of FINGERS) {
+    for (const idx of [finger.mcpIndex, finger.pipIndex, finger.dipIndex, finger.tipIndex]) {
+      landmarkFingerMap[idx] = finger.name;
+    }
+  }
+
   landmarks.forEach((lm, index) => {
-    const x = lm.x * width;
-    const y = lm.y * height;
+    const { x, y } = px(lm);
+    const fingerName = landmarkFingerMap[index];
+    const status: FingerStatus = fingerName ? fingerStatus[fingerName] : 'normal';
+    const fillColor = POINT_COLOR[status];
+    const isTip = [4, 8, 12, 16, 20].includes(index);
+    const radius = isTip ? 4 : 3;
+
     ctx.beginPath();
-    ctx.arc(x, y, index === 0 ? 8 : 5, 0, 2 * Math.PI);
-    ctx.fillStyle = index === 0 ? '#10B981' : '#60A5FA';
+    ctx.arc(x, y, radius, 0, 2 * Math.PI);
+    ctx.fillStyle = fillColor;
     ctx.fill();
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 1;
     ctx.stroke();
   });
 
-  // Draw FE range labels above injured/tracked fingers.
-  // The canvas element has CSS scaleX(-1) applied, so text drawn normally
-  // would appear mirrored. We counter-flip the context around the label
-  // position so the text reads correctly for the patient.
+  // Angle labels above injured finger tips
+  // The canvas has CSS scaleX(-1), so we counter-flip text rendering.
   for (const finger of FINGERS) {
     if (fingerStatus[finger.name] !== 'injured') continue;
 
     const tip = landmarks[finger.tipIndex];
+    const { x, y } = px(tip);
     const angle = Math.round(Math.abs(fingerAngles[finger.name]));
     const label = `${angle}°`;
 
-    const x = tip.x * width;
-    const y = tip.y * height - 18;
-
     ctx.save();
-    ctx.translate(x, y);
-    ctx.scale(-1, 1); // compensate for CSS scaleX(-1) on the canvas element
+    ctx.translate(x, y - 20);
+    ctx.scale(-1, 1);
 
-    ctx.font = 'bold 12px sans-serif';
+    ctx.font = 'bold 11px ui-monospace, monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    const textWidth = ctx.measureText(label).width + 10;
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    const tw = ctx.measureText(label).width + 10;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
     ctx.beginPath();
-    ctx.roundRect(-textWidth / 2, -10, textWidth, 20, 4);
+    ctx.roundRect(-tw / 2, -9, tw, 18, 4);
     ctx.fill();
 
-    ctx.fillStyle = '#F97316';
+    ctx.fillStyle = '#FB923C';
     ctx.fillText(label, 0, 0);
 
     ctx.restore();
@@ -333,7 +283,6 @@ export function updateRepCounter(counter: RepCounter, angle: number): RepCounter
     next.angleHistory = next.angleHistory.slice(-10);
   }
 
-  // Track per-rep extremes
   if (angle > 0) {
     next.currentRepMaxFlex = Math.max(next.currentRepMaxFlex, Math.round(angle));
   } else {

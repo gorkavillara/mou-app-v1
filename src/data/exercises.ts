@@ -1,4 +1,4 @@
-export type ExerciseType = 'MP_IP_BLOCKED' | 'FINGERS_NO_IP_BLOCK' | 'WRIST';
+export type ExerciseType = 'MP_IP_BLOCKED' | 'FINGERS_NO_IP_BLOCK';
 
 export interface Exercise {
   id: ExerciseType;

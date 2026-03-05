@@ -1,36 +1,69 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Mou – Plataforma de Rehabilitación de Mano
 
-## Getting Started
+Mou es una aplicación web de rehabilitación de mano que utiliza **MediaPipe Hand Landmarker** para hacer seguimiento en tiempo real de los dedos del paciente a través de la cámara del dispositivo, sin necesidad de hardware adicional.
 
-First, run the development server:
+## ¿Qué hace?
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- **Detección de la mano en tiempo real** a 30+ fps mediante la cámara frontal (escritorio y móvil).
+- **Seguimiento de ángulos de flexo-extensión** por dedo (MCP joint): detecta si el paciente está flexionando o extendiendo correctamente.
+- **Conteo automático de repeticiones** usando una media deslizante de 10 frames y umbral de ±15°.
+- **Métricas por sesión**: ROM (rango de movimiento), flexión máxima, extensión máxima, repeticiones completadas y tiempo transcurrido.
+- **Estado por dedo**: cada dedo puede marcarse como normal, lesionado (se rastrea y muestra el ángulo en pantalla) o amputado (se excluye del tracking).
+- **Panel de doctor**: vista de pacientes, alertas de adherencia e informes exportables a PDF.
+- **Visualización médica de precisión**: esqueleto de la mano dibujado en canvas con líneas finas cian y re-mapeo de coordenadas para alineación exacta en cualquier resolución y ratio de aspecto.
+
+## Ejercicios disponibles
+
+| ID | Nombre | Descripción |
+|----|--------|-------------|
+| `MP_IP_BLOCKED` | FE activa MP con IP bloqueadas | Flexoextensión metacarpofalángica con interfalángicas bloqueadas |
+| `FINGERS_NO_IP_BLOCK` | FE activa de dedos sin bloqueo de IP | Cierre completo de puño con extensión total |
+
+## Tech Stack
+
+| Capa | Tecnología |
+|------|-----------|
+| Framework | Next.js 16 (App Router, Turbopack) |
+| Lenguaje | TypeScript 5 (strict) |
+| UI | Tailwind CSS 4, Framer Motion, Lucide icons |
+| Tracking | @mediapipe/tasks-vision – Hand Landmarker float16 |
+| Gráficas | Recharts 3 |
+| PDF | jsPDF |
+
+## Estructura del proyecto
+
+```
+src/
+  app/
+    exercises/page.tsx    # Sesión de ejercicio: cámara + tracking + métricas
+    dashboard/page.tsx    # Dashboard del paciente
+    doctor/               # Panel médico (lista de pacientes, detalle)
+    report/page.tsx       # Informe de rehabilitación con exportación PDF
+    profile/page.tsx      # Perfil del paciente
+    login/page.tsx        # Login (prototipo con datos hardcodeados)
+  components/
+    exercises/            # MetricsGrid, ExerciseDemo, FingerSelector, DashboardHeader
+    dashboard/            # Tarjetas IFRM, Adherencia, Calidad, Progreso
+    report/               # Secciones del informe PDF
+  lib/
+    hand-tracking.ts      # Cálculo de ángulos, dibujo del esqueleto, conteo de reps
+  data/
+    exercises.ts          # Definición de ejercicios
+    patients.ts           # Base de datos mock de pacientes
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Comandos
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run dev      # Servidor de desarrollo (Turbopack)
+npm run build    # Build de producción
+npm run lint     # ESLint
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Arquitectura de tracking
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **21 landmarks** por mano (MediaPipe Hand Landmarker).
+- El ángulo de cada dedo se mide entre los vectores `wrist→MCP` y `MCP→PIP` en 3D.
+- Las coordenadas normalizadas de MediaPipe se re-mapean al canvas mediante la transformación `object-fit: cover` del vídeo, garantizando alineación exacta en cualquier dispositivo.
+- El canvas interno se dimensiona dinámicamente al tamaño de visualización del contenedor (sin escalado CSS adicional).
+- Los dedos lesionados se priorizan para el cálculo del ángulo representativo de la sesión.

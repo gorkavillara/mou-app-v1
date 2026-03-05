@@ -16,7 +16,6 @@ import { AppNav } from '@/components/AppNav';
 import { type Exercise } from '@/data/exercises';
 import {
   calculateAllFingerAngles,
-  calculateForearmPoint,
   getExerciseAngle,
   drawHand,
   createRepCounter,
@@ -26,7 +25,6 @@ import {
   type FingerAngles,
   type RepCounter,
   type RepData,
-  type Point,
 } from '@/lib/hand-tracking';
 
 const TARGET_REPS = 10;
@@ -57,7 +55,6 @@ export default function Exercises() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fingerStatus, setFingerStatus] = useState<FingerStatusMap>(DEFAULT_FINGER_STATUS);
-  const [forearmAnchorPoint, setForearmAnchorPoint] = useState<Point | null>(null);
   const [showFingerSelector, setShowFingerSelector] = useState(false);
   const [metrics, setMetrics] = useState<Metrics>({
     rom: 0,
@@ -88,13 +85,11 @@ export default function Exercises() {
     localStorage.setItem('fingerStatus', JSON.stringify(fingerStatus));
   }, [fingerStatus]);
 
-  // Store refs for the detection loop (updated in effect, not during render)
+  // Keep ref in sync so the rAF loop always reads the latest value
   const fingerStatusRef = useRef(fingerStatus);
-  const forearmAnchorPointRef = useRef(forearmAnchorPoint);
   useEffect(() => {
     fingerStatusRef.current = fingerStatus;
-    forearmAnchorPointRef.current = forearmAnchorPoint;
-  }, [fingerStatus, forearmAnchorPoint]);
+  }, [fingerStatus]);
 
   const detectHands = useCallback(() => {
     const step = () => {
@@ -112,8 +107,12 @@ export default function Exercises() {
         return;
       }
 
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      // Match canvas internal resolution to its CSS display size so that
+      // drawn pixels map 1:1 to screen pixels (no extra scaling artifacts).
+      const displayW = canvas.clientWidth || video.videoWidth;
+      const displayH = canvas.clientHeight || video.videoHeight;
+      if (canvas.width !== displayW) canvas.width = displayW;
+      if (canvas.height !== displayH) canvas.height = displayH;
 
       let ts = Math.floor(video.currentTime * 1000);
       if (ts <= lastTimestampRef.current) {
@@ -128,15 +127,6 @@ export default function Exercises() {
 
       if (results.landmarks && results.landmarks.length > 0) {
         const landmarks = results.landmarks[0];
-
-        // Auto-calibrate forearm anchor on first detected frame for any exercise.
-        // We store the absolute position so it stays fixed while the hand moves.
-        if (!forearmAnchorPointRef.current) {
-          const anchor = calculateForearmPoint(landmarks);
-          setForearmAnchorPoint(anchor);
-          forearmAnchorPointRef.current = anchor;
-        }
-
         const fingerAngles: FingerAngles = calculateAllFingerAngles(landmarks);
 
         drawHand(
@@ -144,17 +134,13 @@ export default function Exercises() {
           landmarks,
           canvas.width,
           canvas.height,
+          video.videoWidth,
+          video.videoHeight,
           fingerStatusRef.current,
           fingerAngles,
-          forearmAnchorPointRef.current || undefined
         );
 
-        const angle = getExerciseAngle(
-          landmarks,
-          selectedExercise?.id || 'WRIST',
-          fingerStatusRef.current,
-          forearmAnchorPointRef.current || undefined
-        );
+        const angle = getExerciseAngle(landmarks, fingerStatusRef.current);
         repCounterRef.current = updateRepCounter(repCounterRef.current, angle);
 
         const counter = repCounterRef.current;
@@ -194,7 +180,7 @@ export default function Exercises() {
       animationFrameRef.current = requestAnimationFrame(step);
     };
     step();
-  }, [selectedExercise?.id]);
+  }, []);
 
   useEffect(() => {
     if (phase !== 'tracking') return;
@@ -235,8 +221,10 @@ export default function Exercises() {
 
         handLandmarkerRef.current = handLandmarker;
 
+        // Let the browser choose a resolution suitable for the device;
+        // coordinate remapping handles any aspect ratio.
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: 640, height: 480 },
+          video: { facingMode: 'user' },
         });
 
         if (!isMounted) {
@@ -321,11 +309,7 @@ export default function Exercises() {
         description={selectedExercise?.description || ''}
         videoUrl={selectedExercise?.videoUrl}
         targetReps={TARGET_REPS}
-        onStart={() => {
-          setForearmAnchorPoint(null);
-          forearmAnchorPointRef.current = null;
-          setPhase('tracking');
-        }}
+        onStart={() => setPhase('tracking')}
       />
     );
   }
@@ -340,19 +324,19 @@ export default function Exercises() {
       />
 
       <main className="flex-1 flex flex-col w-full max-w-3xl mx-auto pb-20 md:pb-0">
-        {/* Camera Section */}
-        <div className="relative bg-gray-900 flex-1 min-h-[50vh]">
+        {/* Camera + overlay section */}
+        <div className="relative bg-gray-900 flex-1 min-h-[50vh] overflow-hidden">
           {isLoading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-10">
               <div className="text-center">
-                <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                <p className="text-gray-400 text-sm">Iniciando camara...</p>
+                <div className="w-10 h-10 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                <p className="text-gray-400 text-sm">Iniciando cámara...</p>
               </div>
             </div>
           )}
 
           {error && (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-10">
               <div className="text-center p-4">
                 <div className="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-3">
                   <span className="text-red-500 text-xl">!</span>
@@ -362,71 +346,55 @@ export default function Exercises() {
             </div>
           )}
 
-          <div className="relative w-full h-full flex items-center justify-center">
-            <video
-              ref={videoRef}
-              className="w-full h-full object-cover"
-              playsInline
-              muted
-              style={{ transform: 'scaleX(-1)' }}
-            />
-            <canvas
-              ref={canvasRef}
-              className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-              style={{ transform: 'scaleX(-1)' }}
-            />
+          {/* Video feed – fills container, content object-fit: cover */}
+          <video
+            ref={videoRef}
+            className="absolute inset-0 w-full h-full object-cover"
+            playsInline
+            muted
+            style={{ transform: 'scaleX(-1)' }}
+          />
 
-            {/* Rep counter overlay – top right */}
-            {!isLoading && !error && (
-              <div className="absolute top-3 right-3">
-                <div className="bg-black/60 backdrop-blur-sm rounded-2xl px-4 py-2 text-center min-w-[72px]">
-                  <div className="text-white font-bold text-4xl leading-none tabular-nums">
-                    {metrics.repetitions}
-                  </div>
-                  <div className="text-white/60 text-xs mt-0.5 font-medium">
-                    / {TARGET_REPS} reps
-                  </div>
+          {/* Canvas overlay – internal resolution set dynamically to match container */}
+          <canvas
+            ref={canvasRef}
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            style={{ transform: 'scaleX(-1)' }}
+          />
+
+          {/* Rep counter – top right */}
+          {!isLoading && !error && (
+            <div className="absolute top-3 right-3 z-20">
+              <div className="bg-black/60 backdrop-blur-sm rounded-2xl px-4 py-2 text-center min-w-[72px]">
+                <div className="text-white font-bold text-4xl leading-none tabular-nums">
+                  {metrics.repetitions}
+                </div>
+                <div className="text-white/60 text-xs mt-0.5 font-medium">
+                  / {TARGET_REPS} reps
                 </div>
               </div>
-            )}
+            </div>
+          )}
 
-            {/* Tracking status + finger selector button */}
-            {!isLoading && !error && (
-              <div className="absolute top-3 left-3 flex flex-col gap-2">
-                <div className="flex items-center gap-2">
-                  <div className="bg-black/50 backdrop-blur-sm rounded-lg px-3 py-1.5 flex items-center gap-2">
-                    <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-                    <span className="text-white text-xs font-medium">
-                      Tracking activo
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => setShowFingerSelector(true)}
-                    className="bg-black/50 backdrop-blur-sm rounded-lg p-1.5"
-                  >
-                    <Hand size={16} className="text-white" />
-                  </button>
-                  {selectedExercise?.id === 'WRIST' && (
-                    <button
-                      onClick={() => {
-                        setForearmAnchorPoint(null);
-                        forearmAnchorPointRef.current = null;
-                      }}
-                      className="bg-black/50 backdrop-blur-sm rounded-lg px-2 py-1.5 text-white text-[10px] font-bold"
-                    >
-                      RE-CALIBRAR
-                    </button>
-                  )}
+          {/* Tracking status + finger selector – top left */}
+          {!isLoading && !error && (
+            <div className="absolute top-3 left-3 z-20 flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <div className="bg-black/50 backdrop-blur-sm rounded-lg px-3 py-1.5 flex items-center gap-2">
+                  <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse" />
+                  <span className="text-white text-xs font-medium">
+                    Tracking activo
+                  </span>
                 </div>
-
-                {selectedExercise?.id === 'WRIST' && !forearmAnchorPoint && (
-                  <div className="bg-blue-600/90 backdrop-blur-sm rounded-lg px-3 py-2 text-white text-xs animate-bounce">
-                    Alinea mano y antebrazo para calibrar
-                  </div>
-                )}
+                <button
+                  onClick={() => setShowFingerSelector(true)}
+                  className="bg-black/50 backdrop-blur-sm rounded-lg p-1.5"
+                >
+                  <Hand size={16} className="text-white" />
+                </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Metrics Grid */}
