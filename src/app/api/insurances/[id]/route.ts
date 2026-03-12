@@ -1,27 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { createClient } from '@/lib/supabase'
+import { createSupabaseServerClient } from '@/lib/supabase/server'
 
-// GET /api/insurances/[id] - Obtener una mutua
+// GET /api/insurances/[id] - Obtener una mutua por ID
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params
+    const supabase = await createSupabaseServerClient()
 
-    const insurance = await prisma.insurance.findUnique({
-      where: { id },
-      include: {
-        doctors: {
-          include: {
-            doctor: true,
-          },
-        },
-        patients: true,
-      },
-    })
+    const { data: insurance, error } = await supabase
+      .from('insurances')
+      .select('*')
+      .eq('id', id)
+      .single()
 
+    if (error) throw error
     if (!insurance) {
       return NextResponse.json({ error: 'Insurance not found' }, { status: 404 })
     }
@@ -39,27 +34,24 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    // Verificar autenticación
-    const supabase = createClient()
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const supabase = await createSupabaseServerClient()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    if (authError || !user) {
+    if (!user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const userRole = user.user_metadata?.role
-    if (userRole !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden - Admin only' }, { status: 403 })
     }
 
     const { id } = await params
     const body = await request.json()
 
-    const insurance = await prisma.insurance.update({
-      where: { id },
-      data: body,
-    })
+    const { data: insurance, error } = await supabase
+      .from('insurances')
+      .update(body)
+      .eq('id', id)
+      .select()
+      .single()
 
+    if (error) throw error
     return NextResponse.json(insurance)
   } catch (error) {
     console.error('Error updating insurance:', error)
@@ -67,33 +59,29 @@ export async function PUT(
   }
 }
 
-// DELETE /api/insurances/[id] - Eliminar una mutua
+// DELETE /api/insurances/[id] - Eliminar (soft delete) una mutua
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    // Verificar autenticación
-    const supabase = createClient()
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const supabase = await createSupabaseServerClient()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    if (authError || !user) {
+    if (!user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const userRole = user.user_metadata?.role
-    if (userRole !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden - Admin only' }, { status: 403 })
     }
 
     const { id } = await params
 
-    // Soft delete - marcar como inactiva
-    const insurance = await prisma.insurance.update({
-      where: { id },
-      data: { isActive: false },
-    })
+    const { data: insurance, error } = await supabase
+      .from('insurances')
+      .update({ isActive: false })
+      .eq('id', id)
+      .select()
+      .single()
 
+    if (error) throw error
     return NextResponse.json({ message: 'Insurance deactivated', insurance })
   } catch (error) {
     console.error('Error deleting insurance:', error)
