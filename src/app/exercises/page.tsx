@@ -14,6 +14,7 @@ import { ExerciseSelector } from '@/components/exercises/ExerciseSelector';
 import { Hand } from 'lucide-react';
 import { AppNav } from '@/components/AppNav';
 import { type Exercise } from '@/data/exercises';
+import { createClient } from '@/lib/supabase';
 import {
   calculateAllFingerAngles,
   getExerciseAngle,
@@ -25,7 +26,16 @@ import {
   type FingerAngles,
   type RepCounter,
   type RepData,
+  type HandSignature,
 } from '@/lib/hand-tracking';
+import { isPatientOnLowBack, checkAndNotify, requestNotificationPermission, getLowBackEndMessage } from '@/lib/notifications';
+import { HandIdentityValidator } from '@/components/exercises/HandIdentityValidator';
+import { ChecklistManual, type ManualRep } from '@/components/exercises/ChecklistManual';
+import { NotificationBanner, useNotificationHandler } from '@/components/exercises/NotificationBanner';
+import { patients } from '@/data/patients';
+import { Video, Edit3 } from 'lucide-react';
+
+const supabase = createClient();
 
 const TARGET_REPS = 10;
 
@@ -39,7 +49,11 @@ type Metrics = {
   lastRep: RepData | null;
 };
 
-type Phase = 'exercise-select' | 'finger-select' | 'demo' | 'tracking';
+type Phase = 'exercise-select' | 'finger-select' | 'identity-validation' | 'demo' | 'tracking';
+
+type EntryMode = 'camera' | 'manual' | null;
+
+const currentPatient = patients[0];
 
 export default function Exercises() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -56,6 +70,10 @@ export default function Exercises() {
   const [error, setError] = useState<string | null>(null);
   const [fingerStatus, setFingerStatus] = useState<FingerStatusMap>(DEFAULT_FINGER_STATUS);
   const [showFingerSelector, setShowFingerSelector] = useState(false);
+  const [entryMode, setEntryMode] = useState<EntryMode>(null);
+  const [handSignature, setHandSignature] = useState<HandSignature | undefined>();
+  const { notifications, addNotification, dismissNotification } = useNotificationHandler();
+  const [manualReps, setManualReps] = useState<ManualRep[]>([]);
   const [metrics, setMetrics] = useState<Metrics>({
     rom: 0,
     maxFlexion: 0,
@@ -90,6 +108,22 @@ export default function Exercises() {
   useEffect(() => {
     fingerStatusRef.current = fingerStatus;
   }, [fingerStatus]);
+
+  // Check notifications on mount
+  useEffect(() => {
+    requestNotificationPermission().then((granted) => {
+      if (granted) {
+        checkAndNotify(currentPatient, (msg, type) => {
+          addNotification(msg, type);
+        });
+        
+        const lowBackMsg = getLowBackEndMessage(currentPatient);
+        if (lowBackMsg) {
+          addNotification(lowBackMsg, 'info');
+        }
+      }
+    });
+  }, [addNotification]);
 
   const detectHands = useCallback(() => {
     const step = () => {
@@ -297,26 +331,68 @@ export default function Exercises() {
       <FingerSelector
         fingerStatus={fingerStatus}
         onChange={setFingerStatus}
-        onConfirm={() => setPhase('demo')}
+        onConfirm={() => setPhase('identity-validation')}
       />
+    );
+  }
+
+  if (phase === 'identity-validation') {
+    return (
+      <>
+        <NotificationBanner notifications={notifications} onDismiss={dismissNotification} />
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <HandIdentityValidator
+            patient={currentPatient}
+            onValidated={(signature) => {
+              setHandSignature(signature);
+              setPhase('demo');
+            }}
+            onSkip={() => setPhase('demo')}
+          />
+        </div>
+      </>
     );
   }
 
   if (phase === 'demo') {
     return (
-      <ExerciseDemo
-        exerciseName={selectedExercise?.name || 'Ejercicio'}
-        description={selectedExercise?.description || ''}
-        videoUrl={selectedExercise?.videoUrl}
-        targetReps={TARGET_REPS}
-        onStart={() => setPhase('tracking')}
-      />
+      <>
+        <NotificationBanner notifications={notifications} onDismiss={dismissNotification} />
+        <div className="min-h-screen bg-gray-50 flex flex-col md:pl-[220px]">
+          <AppNav active="/exercises" />
+          <DashboardHeader
+            exerciseName={selectedExercise?.name || 'Ejercicio'}
+            dayInfo="Dia 3"
+            phaseInfo="Fase Inicial"
+          />
+          <main className="flex-1 flex flex-col items-center justify-center p-6">
+            <div className="max-w-md w-full">
+              <h2 className="text-2xl font-semibold text-gray-900 mb-6 text-center">
+                ¿Cómo quieres registrar tu sesión?
+              </h2>
+              <div className="space-y-4">
+                <button
+                  onClick={() => {
+                    setEntryMode('camera');
+                    setPhase('tracking');
+                  }}
+                  className="w-full bg-cyan-500 hover:bg-cyan-600 text-white py-4 rounded-2xl font-medium flex items-center justify-center gap-3 text-lg"
+                >
+                  <Video size={24} />
+                  Usar Cámara
+                </button>
+              </div>
+            </div>
+          </main>
+        </div>
+      </>
     );
   }
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col md:pl-[220px]">
       <AppNav active="/exercises" />
+      <NotificationBanner notifications={notifications} onDismiss={dismissNotification} />
       <DashboardHeader
         exerciseName={selectedExercise?.name || 'Ejercicio'}
         dayInfo="Dia 3"
@@ -410,6 +486,27 @@ export default function Exercises() {
             lastRep={metrics.lastRep}
           />
         </div>
+
+        {/* Botón de Finalizar - aparece cuando se alcanza el objetivo */}
+        {metrics.repetitions >= TARGET_REPS && (
+          <div className="p-4 bg-green-50 border-t border-green-200">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-green-600 font-medium">¡Objetivo alcanzado!</span>
+                <span className="text-green-500 text-sm">{metrics.repetitions} repeticiones</span>
+              </div>
+              <button
+                onClick={() => {
+                  alert('Sesión guardada. ¡Buen trabajo!');
+                  window.location.href = '/dashboard';
+                }}
+                className="px-6 py-2 bg-green-500 text-white rounded-lg font-medium hover:bg-green-600 transition-colors"
+              >
+                Finalizar Sesión
+              </button>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Finger selector modal */}

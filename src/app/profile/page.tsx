@@ -1,14 +1,69 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Mail, Phone, Calendar, CalendarCheck } from 'lucide-react';
 import { PatientHeader } from '@/components/report/PatientHeader';
 import { IFRMCard } from '@/components/dashboard/IFRMCard';
 import { WeeklyProgress } from '@/components/dashboard/WeeklyProgress';
 import { RecentExercises } from '@/components/dashboard/RecentExercises';
 import { AppNav } from '@/components/AppNav';
+import { createClient } from '@/lib/supabase';
+
+const supabase = createClient();
+
+type Patient = {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  ifrm?: number;
+  startDate?: string;
+  insuranceId?: string;
+};
 
 export default function Profile() {
+  const [patient, setPatient] = useState<Patient | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchPatient() {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user?.email) {
+        setLoading(false);
+        return;
+      }
+
+      const { data: patientData } = await supabase
+        .from('patients')
+        .select('*')
+        .eq('email', user.email)
+        .single();
+
+      if (patientData) {
+        setPatient(patientData);
+      }
+      setLoading(false);
+    }
+
+    fetchPatient();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#F2F2F7] pb-24 md:pb-8 md:pl-[220px] font-sans">
+        <AppNav active="/profile" />
+        <div className="flex items-center justify-center h-64 pt-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        </div>
+      </div>
+    );
+  }
+
+  const patientName = patient?.name || 'Paciente';
+  const patientEmail = patient?.email || '';
+  const patientPhone = patient?.phone || '+34 000 000 000';
+
   return (
     <div className="min-h-screen bg-[#F2F2F7] pb-24 md:pb-8 md:pl-[220px] font-sans">
       <AppNav active="/profile" />
@@ -21,10 +76,10 @@ export default function Profile() {
           </div>
 
           <PatientHeader
-            name="Carlos Mendoza"
-            id="P-2024-1847"
+            name={patientName}
+            id={patient?.id ? `P-${patient.id.slice(0, 8).toUpperCase()}` : 'P-00000000'}
             period="Tratamiento activo"
-            clinic="Centro de Rehabilitación San José"
+            clinic="Centro de Rehabilitación Mou"
           />
 
           <IFRMCard />
@@ -41,7 +96,7 @@ export default function Profile() {
                   </div>
                   <div>
                     <p className="text-gray-500 text-xs uppercase tracking-wider font-semibold mb-1">Correo</p>
-                    <p className="text-gray-900 font-medium text-base">jcoloma@mouapp.com</p>
+                    <p className="text-gray-900 font-medium text-base">{patientEmail}</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
@@ -50,7 +105,7 @@ export default function Profile() {
                   </div>
                   <div>
                     <p className="text-gray-500 text-xs uppercase tracking-wider font-semibold mb-1">Teléfono</p>
-                    <p className="text-gray-900 font-medium text-base">+34 600 123 456</p>
+                    <p className="text-gray-900 font-medium text-base">{patientPhone}</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
@@ -68,7 +123,7 @@ export default function Profile() {
                   </div>
                   <div>
                     <p className="text-gray-500 text-xs uppercase tracking-wider font-semibold mb-1">Próxima cita</p>
-                    <p className="text-gray-900 font-medium text-base">12 Feb 2025, 10:30</p>
+                    <p className="text-gray-900 font-medium text-base">Pendiente</p>
                   </div>
                 </div>
               </div>

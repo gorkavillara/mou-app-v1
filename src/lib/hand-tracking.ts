@@ -315,3 +315,157 @@ export function updateRepCounter(counter: RepCounter, angle: number): RepCounter
 
   return next;
 }
+
+// --- Enhanced ROM: MCP and IF angles ---
+
+export type ROMAngles = {
+  mcp: number;
+  ifProximal: number;
+  ifDistal: number;
+};
+
+export function calculateMCPAngle(landmarks: Point[], finger: FingerConfig): number {
+  const wrist = landmarks[0];
+  const mcp = landmarks[finger.mcpIndex];
+  const pip = landmarks[finger.pipIndex];
+
+  const v1 = { x: mcp.x - wrist.x, y: mcp.y - wrist.y, z: mcp.z - wrist.z };
+  const v2 = { x: pip.x - mcp.x, y: pip.y - mcp.y, z: pip.z - mcp.z };
+
+  const dot = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
+  const mag1 = Math.sqrt(v1.x ** 2 + v1.y ** 2 + v1.z ** 2);
+  const mag2 = Math.sqrt(v2.x ** 2 + v2.y ** 2 + v2.z ** 2);
+
+  if (mag1 === 0 || mag2 === 0) return 0;
+
+  const cosAngle = Math.max(-1, Math.min(1, dot / (mag1 * mag2)));
+  const angle = Math.acos(cosAngle) * (180 / Math.PI);
+
+  const cross = v1.x * v2.y - v1.y * v2.x;
+  return cross > 0 ? angle : -angle;
+}
+
+export function calculateIFAngle(landmarks: Point[], finger: FingerConfig): ROMAngles {
+  const mcp = landmarks[finger.mcpIndex];
+  const pip = landmarks[finger.pipIndex];
+  const dip = landmarks[finger.dipIndex];
+  const tip = landmarks[finger.tipIndex];
+
+  const v1 = { x: pip.x - mcp.x, y: pip.y - mcp.y, z: pip.z - mcp.z };
+  const v2 = { x: dip.x - pip.x, y: dip.y - pip.y, z: dip.z - pip.z };
+  const dot1 = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
+  const mag1_ = Math.sqrt(v1.x ** 2 + v1.y ** 2 + v1.z ** 2);
+  const mag2_ = Math.sqrt(v2.x ** 2 + v2.y ** 2 + v2.z ** 2);
+
+  let ifProximal = 0;
+  if (mag1_ > 0 && mag2_ > 0) {
+    const cosAngle1 = Math.max(-1, Math.min(1, dot1 / (mag1_ * mag2_)));
+    ifProximal = Math.acos(cosAngle1) * (180 / Math.PI);
+  }
+
+  const v3 = { x: dip.x - pip.x, y: dip.y - pip.y, z: dip.z - pip.z };
+  const v4 = { x: tip.x - dip.x, y: tip.y - dip.y, z: tip.z - dip.z };
+  const dot2 = v3.x * v4.x + v3.y * v4.y + v3.z * v4.z;
+  const mag3 = Math.sqrt(v3.x ** 2 + v3.y ** 2 + v3.z ** 2);
+  const mag4 = Math.sqrt(v4.x ** 2 + v4.y ** 2 + v4.z ** 2);
+
+  let ifDistal = 0;
+  if (mag3 > 0 && mag4 > 0) {
+    const cosAngle2 = Math.max(-1, Math.min(1, dot2 / (mag3 * mag4)));
+    ifDistal = Math.acos(cosAngle2) * (180 / Math.PI);
+  }
+
+  return {
+    mcp: calculateMCPAngle(landmarks, finger),
+    ifProximal,
+    ifDistal,
+  };
+}
+
+// --- Hand Signature for Identity Validation ---
+
+export type HandSignatureMetadata = {
+  avgFingerLength: number;
+  palmWidth: number;
+  handRatio: number;
+};
+
+export type HandSignature = {
+  landmarks: Point[];
+  metadata: HandSignatureMetadata;
+  createdAt: number;
+};
+
+function calculateDistance(p1: Point, p2: Point): number {
+  return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2 + (p1.z - p2.z) ** 2);
+}
+
+export function createHandSignature(landmarks: Point[]): HandSignature {
+  const wrist = landmarks[0];
+  
+  const fingerTips = [landmarks[4], landmarks[8], landmarks[12], landmarks[16], landmarks[20]];
+  const fingerBases = [landmarks[1], landmarks[5], landmarks[9], landmarks[13], landmarks[17]];
+  
+  let totalFingerLength = 0;
+  for (let i = 0; i < 5; i++) {
+    totalFingerLength += calculateDistance(fingerTips[i], fingerBases[i]);
+  }
+  const avgFingerLength = totalFingerLength / 5;
+
+  const palmWidth = calculateDistance(landmarks[5], landmarks[17]);
+  const handLength = calculateDistance(wrist, landmarks[12]);
+
+  return {
+    landmarks,
+    metadata: {
+      avgFingerLength,
+      palmWidth,
+      handRatio: handLength > 0 ? palmWidth / handLength : 0,
+    },
+    createdAt: Date.now(),
+  };
+}
+
+function normalizePoint(p: Point, ref: Point): Point {
+  return { x: p.x - ref.x, y: p.y - ref.y, z: p.z - ref.z };
+}
+
+function calculateSimilarityMetric(sig1: HandSignature, normalized2: Point[]): number {
+  if (sig1.landmarks.length !== normalized2.length) return 0;
+
+  let totalDiff = 0;
+  const numPoints = sig1.landmarks.length;
+  
+  for (let i = 0; i < numPoints; i++) {
+    const diff = Math.sqrt(
+      (sig1.landmarks[i].x - normalized2[i].x) ** 2 +
+      (sig1.landmarks[i].y - normalized2[i].y) ** 2 +
+      (sig1.landmarks[i].z - normalized2[i].z) ** 2
+    );
+    totalDiff += diff;
+  }
+
+  const avgDiff = totalDiff / numPoints;
+  const maxPossibleDiff = 2.0;
+  const similarity = Math.max(0, 100 - (avgDiff / maxPossibleDiff) * 100);
+  
+  return Math.min(100, similarity + (100 - Math.abs(sig1.metadata.handRatio - 
+    (calculateDistance(normalized2[5], normalized2[17]) / 
+     (calculateDistance(normalized2[0], normalized2[12]) || 1))) * 20));
+}
+
+export function compareHandSignature(
+  stored: HandSignature,
+  capturedLandmarks: Point[]
+): number {
+  const refPoint = stored.landmarks[0];
+  const capturedRef = capturedLandmarks[0];
+  
+  const normalizedStored = stored.landmarks.map(lm => normalizePoint(lm, refPoint));
+  const normalizedCaptured = capturedLandmarks.map(lm => normalizePoint(lm, capturedRef));
+  
+  return calculateSimilarityMetric(
+    { ...stored, landmarks: normalizedStored },
+    normalizedCaptured
+  );
+}

@@ -96,3 +96,35 @@ npm run lint         # ESLint
 - Avoid magic numbers: use named constants (e.g., `TARGET_REPS`, threshold values)
 - Keep the render method readable: extract complex JSX into named components
 - No dead code - remove unused imports, variables, and functions
+
+## Notion Sync (SDD Tasks)
+
+This project uses Notion for tracking SDD tasks.
+
+### Configuration (Pre-configured)
+- **Database ID**: `31c5bfba29cd80cc9b0ccf351b7af1ae`
+- **Database URL**: https://www.notion.so/gorkavillar/31c5bfba29cd80cc9b0ccf351b7af1ae
+- **Status Options**: Por hacer → En progreso → Completado
+
+### MCP Server
+The Notion MCP is configured in this project's Claude config:
+```bash
+claude mcp list  # Verify: notion: npx -y @notionhq/notion-mcp-server - ✓ Connected
+```
+
+### Operations
+
+**Sync Tasks**: Create all tasks from SDD task plan in Notion
+**Update Status**: Mark tasks as "En progreso" or "Completado"
+
+### API Usage
+```bash
+# Create task
+curl -X POST -H "Authorization: Bearer YOUR_NOTION_TOKEN" \
+  -H "Notion-Version: 2022-06-28" "https://api.notion.com/v1/pages" \
+  -d '{"parent": {"database_id": "31c5bfba29cd80cc9b0ccf351b7af1ae"}, "properties": {...}}'
+
+# Update status
+curl -X PATCH -H "Authorization: Bearer YOUR_NOTION_TOKEN" "https://api.notion.com/v1/pages/{id}" \
+  -d '{"properties": {"Status": {"status": {"name": "Completado"}}}}'
+```

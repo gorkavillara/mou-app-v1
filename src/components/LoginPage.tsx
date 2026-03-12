@@ -3,22 +3,45 @@
 import React, { useState } from 'react';
 import { LockIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { createClient } from '@/lib/supabase';
 
 export function LoginPage() {
   const router = useRouter();
+  const supabase = createClient();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const isValid = email.trim() === 'jcoloma@mouapp.com' && password === 'jcoloma';
-    if (isValid) {
-      setError('');
-      router.push('/dashboard');
-    } else {
+    setLoading(true);
+    setError('');
+
+    const { error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    });
+
+    if (authError) {
       setError('Credenciales incorrectas. Inténtalo de nuevo.');
+      setLoading(false);
+      return;
     }
+
+    // Obtener el perfil del usuario para determinar el rol
+    const res = await fetch('/api/auth/role')
+    const profile = await res.json()
+
+    // Redirigir según el rol
+    const redirectPath = profile?.role === 'admin' ? '/admin'
+      : profile?.role === 'doctor' ? '/doctor'
+      : profile?.role === 'mutua' ? '/mutua'
+      : '/dashboard';
+
+    router.push(redirectPath);
+    router.refresh();
   };
 
   return (
@@ -85,17 +108,18 @@ export function LoginPage() {
           <div className="pt-2">
             <button
               type="submit"
-              className="w-full h-11 bg-[#007AFF] hover:bg-[#0069D9] active:bg-[#005BB5] text-white text-[17px] font-semibold rounded-[10px] transition-colors duration-200 flex items-center justify-center shadow-sm">
-              Iniciar Sesión
+              disabled={loading}
+              className="w-full h-11 bg-[#007AFF] hover:bg-[#0069D9] active:bg-[#005BB5] disabled:bg-blue-300 text-white text-[17px] font-semibold rounded-[10px] transition-colors duration-200 flex items-center justify-center shadow-sm">
+              {loading ? 'Iniciando...' : 'Iniciar Sesión'}
             </button>
           </div>
 
           <div className="flex flex-col items-center space-y-3 pt-2">
-            <a
-              href="#"
+            <Link
+              href="/forgot-password"
               className="text-[13px] text-[#8E8E93] hover:text-[#007AFF] transition-colors font-normal">
               ¿Olvidaste tu contraseña?
-            </a>
+            </Link>
             <a
               href="#"
               className="text-[13px] text-[#8E8E93] hover:text-[#007AFF] transition-colors font-normal">
