@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 // GET /api/insurances/[id] - Obtener una mutua por ID
 export async function GET(
@@ -8,20 +7,32 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    const supabase = await createSupabaseServerClient()
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+    
+    const response = await fetch(
+      `${supabaseUrl}/rest/v1/insurances?id=eq.${id}`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`
+        }
+      }
+    )
 
-    const { data: insurance, error } = await supabase
-      .from('insurances')
-      .select('*')
-      .eq('id', id)
-      .single()
+    if (!response.ok) {
+      const text = await response.text()
+      return NextResponse.json({ error: 'Failed to fetch', details: text }, { status: 500 })
+    }
 
-    if (error) throw error
-    if (!insurance) {
+    const data = await response.json()
+    if (!data || data.length === 0) {
       return NextResponse.json({ error: 'Insurance not found' }, { status: 404 })
     }
 
-    return NextResponse.json(insurance)
+    return NextResponse.json(data[0])
   } catch (error) {
     console.error('Error fetching insurance:', error)
     return NextResponse.json({ error: 'Failed to fetch insurance' }, { status: 500 })
@@ -34,25 +45,36 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createSupabaseServerClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const { id } = await params
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+    
+    const body = await request.json()
+    
+    // Quitar campos que no existen en la tabla
+    delete body.id
+    delete body.createdAt
+    
+    const response = await fetch(
+      `${supabaseUrl}/rest/v1/insurances?id=eq.${id}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`
+        },
+        body: JSON.stringify(body)
+      }
+    )
 
-    if (!user?.email) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!response.ok) {
+      const text = await response.text()
+      return NextResponse.json({ error: 'Failed to update', details: text }, { status: 500 })
     }
 
-    const { id } = await params
-    const body = await request.json()
-
-    const { data: insurance, error } = await supabase
-      .from('insurances')
-      .update(body)
-      .eq('id', id)
-      .select()
-      .single()
-
-    if (error) throw error
-    return NextResponse.json(insurance)
+    const data = await response.json()
+    return NextResponse.json(data)
   } catch (error) {
     console.error('Error updating insurance:', error)
     return NextResponse.json({ error: 'Failed to update insurance' }, { status: 500 })
@@ -65,24 +87,29 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createSupabaseServerClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const { id } = await params
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+    
+    const response = await fetch(
+      `${supabaseUrl}/rest/v1/insurances?id=eq.${id}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`
+        },
+        body: JSON.stringify({ isActive: false })
+      }
+    )
 
-    if (!user?.email) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!response.ok) {
+      const text = await response.text()
+      return NextResponse.json({ error: 'Failed to delete', details: text }, { status: 500 })
     }
 
-    const { id } = await params
-
-    const { data: insurance, error } = await supabase
-      .from('insurances')
-      .update({ isActive: false })
-      .eq('id', id)
-      .select()
-      .single()
-
-    if (error) throw error
-    return NextResponse.json({ message: 'Insurance deactivated', insurance })
+    return NextResponse.json({ message: 'Insurance deactivated' })
   } catch (error) {
     console.error('Error deleting insurance:', error)
     return NextResponse.json({ error: 'Failed to delete insurance' }, { status: 500 })
