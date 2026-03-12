@@ -18,6 +18,7 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [error, setError] = useState('')
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -41,6 +42,7 @@ export default function AdminUsersPage() {
     try {
       const res = await fetch('/api/admin/users')
       const data = await res.json()
+      console.log('Users loaded:', data)
       setUsers(data)
     } catch (error) {
       console.error('Error loading users:', error)
@@ -63,12 +65,18 @@ export default function AdminUsersPage() {
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault()
+    setError('')
+    
+    console.log('Creating user with data:', formData)
     
     const res = await fetch('/api/admin/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(formData)
     })
+
+    const data = await res.json()
+    console.log('Create user response:', res.status, data)
 
     if (res.ok) {
       setShowModal(false)
@@ -83,7 +91,7 @@ export default function AdminUsersPage() {
       })
       loadUsers()
     } else {
-      alert('Error al crear usuario')
+      setError(data.error || 'Error al crear usuario')
     }
   }
 
@@ -170,7 +178,7 @@ export default function AdminUsersPage() {
                     </td>
                     <td className="px-6 py-4 text-gray-600">{user.email}</td>
                     <td className="px-6 py-4 text-gray-500 text-sm">
-                      {new Date(user.createdAt).toLocaleDateString('es-ES')}
+                      {user.createdAt ? new Date(user.createdAt).toLocaleDateString('es-ES') : '-'}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <button
@@ -200,6 +208,11 @@ export default function AdminUsersPage() {
             <h2 className="text-xl font-semibold text-gray-900 mb-4">
               Crear Nuevo Usuario
             </h2>
+            {error && (
+              <div className="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">
+                {error}
+              </div>
+            )}
             <form onSubmit={handleCreateUser} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -288,12 +301,11 @@ export default function AdminUsersPage() {
                       Mutua
                     </label>
                     <select
-                      required
                       className="w-full px-4 py-2 border border-gray-200 rounded-lg"
                       value={formData.insuranceId}
                       onChange={e => setFormData({...formData, insuranceId: e.target.value})}
                     >
-                      <option value="">Seleccionar mutua</option>
+                      <option value="">Sin mutua</option>
                       {insurances.map(i => (
                         <option key={i.id} value={i.id}>{i.name}</option>
                       ))}

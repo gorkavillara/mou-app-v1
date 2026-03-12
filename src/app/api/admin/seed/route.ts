@@ -4,20 +4,32 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 export async function POST() {
   const supabase = await createSupabaseServerClient()
 
-  // Verificar que es admin
+  // Verificar que está autenticado
   const { data: { user } } = await supabase.auth.getUser()
   if (!user?.email) {
     return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 })
   }
 
-  const { data: admin } = await supabase
+  // Buscar o crear admin
+  let { data: admin } = await supabase
     .from('admins')
     .select('id')
     .eq('email', user.email)
     .single()
 
-  if (!admin) {
-    return NextResponse.json({ success: false, message: 'Forbidden' }, { status: 403 })
+  // Si no existe admin, crearlo
+  let adminId = admin?.id || null
+  if (!adminId) {
+    const { data: newAdmin, error } = await supabase.from('admins').upsert({
+      email: user.email,
+      name: 'Admin',
+      role: 'OWNER'
+    }, { onConflict: 'email' }).select().single()
+    if (error) {
+      console.error('Error creating admin:', error)
+    } else if (newAdmin) {
+      adminId = newAdmin.id
+    }
   }
 
   try {
@@ -34,9 +46,9 @@ export async function POST() {
 
     // 2. Crear mutuas
     const insurances = [
-      { id: 'ins-1', adminId: admin.id, name: 'Mapfre', slug: 'mapfre', contactEmail: 'mapfre@mou.com' },
-      { id: 'ins-2', adminId: admin.id, name: 'Sanitas', slug: 'sanitas', contactEmail: 'sanitas@mou.com' },
-      { id: 'ins-3', adminId: admin.id, name: 'Allianz', slug: 'allianz', contactEmail: 'allianz@mou.com' }
+      { id: 'ins-1', adminId: adminId, name: 'Mapfre', slug: 'mapfre', contactEmail: 'mapfre@mou.com' },
+      { id: 'ins-2', adminId: adminId, name: 'Sanitas', slug: 'sanitas', contactEmail: 'sanitas@mou.com' },
+      { id: 'ins-3', adminId: adminId, name: 'Allianz', slug: 'allianz', contactEmail: 'allianz@mou.com' }
     ]
 
     for (const ins of insurances) {

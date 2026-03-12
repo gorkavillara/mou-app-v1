@@ -1,0 +1,10 @@
+[
+  {"name": "F2 - API de Métricas (PatientMetric)", "bloque": "F: Integración", "numero": "F1", "prioridad": "Alta", "estimacion": "2h", "descripcion": "API para guardar métricas históricas de pacientes (IFRM, adherencia, dolor)", "criterios": "✅ CRUD PatientMetric funcionando"},
+  {"name": "F2 - Dashboard del Médico", "bloque": "F: Integración", "numero": "F2", "prioridad": "Alta", "estimacion": "4h", "descripcion": "Actualizar src/app/doctor/page.tsx para mostrar pacientes asignados, métricas, alertas", "criterios": "✅ Dashboard muestra datos reales"},
+  {"name": "F2 - Lista de Pacientes del Médico", "bloque": "F: Integración", "numero": "F3", "prioridad": "Alta", "estimacion": "4h", "descripcion": "Actualizar src/app/doctor/pacientes/page.tsx para listar pacientes desde API", "criterios": "✅ Lista de pacientes desde BD"},
+  {"name": "F2 - Detalle de Paciente", "bloque": "F: Integración", "numero": "F4", "prioridad": "Alta", "estimacion": "4h", "descripcion": "Actualizar src/app/doctor/pacientes/[id]/page.tsx con sesiones, notas, tareas, grabaciones", "criterios": "✅ Página de detalle completa"},
+  {"name": "F2 - Integración Ejercicios con API", "bloque": "F: Integración", "numero": "F5", "prioridad": "Alta", "estimacion": "4h", "descripcion": "Conectar src/app/exercises/page.tsx con la API de sesiones", "criterios": "✅ Sesiones guardadas en BD"},
+  {"name": "F2 - Dashboard Paciente", "bloque": "F: Integración", "numero": "F6", "prioridad": "Alta", "estimacion": "4h", "descripcion": "Actualizar src/app/dashboard/page.tsx con datos reales del paciente", "criterios": "✅ Dashboard con datos de BD"},
+  {"name": "F2 - Perfil de Paciente", "bloque": "F: Integración", "numero": "F7", "prioridad": "Media", "estimacion": "2h", "descripcion": "Actualizar src/app/profile/page.tsx con datos del paciente", "criterios": "✅ Perfil editable"},
+  {"name": "F2 - Reportes con datos reales", "bloque": "F: Integración", "numero": "F8", "prioridad": "Media", "estimacion": "4h", "descripcion": "Conectar src/app/report/page.tsx con sesiones guardadas", "criterios": "✅ Reportes con datos reales"}
+]

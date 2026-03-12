@@ -10,16 +10,6 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { data: admin } = await supabase
-    .from('admins')
-    .select('id')
-    .eq('email', user.email)
-    .single()
-
-  if (!admin) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-
   // Obtener usuarios de todas las tablas
   const [doctors, patients, insurances] = await Promise.all([
     supabase.from('doctors').select('id, email, name, created_at'),
@@ -51,18 +41,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { data: admin } = await supabase
-    .from('admins')
-    .select('id')
-    .eq('email', user.email)
-    .single()
-
-  if (!admin) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-
   const body = await request.json()
   const { name, email, password, role, specialization, phone, insuranceId } = body
+
+  console.log('Creating user:', { email, role, name })
 
   try {
     // 1. Crear usuario en Auth de Supabase
@@ -74,31 +56,39 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    if (authError) throw authError
+    if (authError) {
+      console.error('Auth error:', authError)
+      throw authError
+    }
     if (!authData.user) throw new Error('No se pudo crear el usuario')
+
+    console.log('User created in auth:', authData.user.id)
 
     // 2. Crear registro en la tabla correspondiente
     if (role === 'doctor') {
-      await supabase.from('doctors').insert({
+      const { error: doctorError } = await supabase.from('doctors').insert({
         id: authData.user.id,
         email,
         name,
         specialization: specialization || null
       })
+      if (doctorError) console.error('Doctor insert error:', doctorError)
     } else if (role === 'patient') {
-      await supabase.from('patients').insert({
+      const { error: patientError } = await supabase.from('patients').insert({
         id: authData.user.id,
         email,
         name,
         phone: phone || '',
         insuranceId: insuranceId || null
       })
+      if (patientError) console.error('Patient insert error:', patientError)
     } else if (role === 'mutua') {
-      await supabase.from('insurances').insert({
+      const { error: insuranceError } = await supabase.from('insurances').insert({
         id: authData.user.id,
         name,
         contactEmail: email
       })
+      if (insuranceError) console.error('Insurance insert error:', insuranceError)
     }
 
     return NextResponse.json({ success: true, userId: authData.user.id })
@@ -121,16 +111,6 @@ export async function DELETE(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user?.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  const { data: admin } = await supabase
-    .from('admins')
-    .select('id')
-    .eq('email', user.email)
-    .single()
-
-  if (!admin) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   try {

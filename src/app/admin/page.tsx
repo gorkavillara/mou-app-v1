@@ -1,17 +1,15 @@
-"use client"
+'use client';
 
-import { useEffect, useState } from 'react'
-import Link from 'next/link'
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { 
   UsersIcon, 
   StethoscopeIcon, 
   Building2Icon, 
   ActivityIcon,
-  SettingsIcon,
-  UserPlusIcon,
   DatabaseIcon,
   ArrowRightIcon
-} from 'lucide-react'
+} from 'lucide-react';
 
 interface Stats {
   totalDoctors: number

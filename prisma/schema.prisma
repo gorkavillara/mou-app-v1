@@ -35,7 +35,7 @@ model Admin {
 
 model Insurance {
   id           String   @id @default(uuid())
-  adminId      String   @map("admin_id")
+  adminId      String?  @map("admin_id") // Optional - puede no tener admin asignado
   name         String // "Mapfre", "Sanitas", etc.
   slug         String   @unique // Para URLs: "mapfre"
   logo         String?
@@ -46,7 +46,7 @@ model Insurance {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  admin    Admin             @relation(fields: [adminId], references: [id])
+  admin    Admin?            @relation(fields: [adminId], references: [id])
   doctors  InsuranceDoctor[]
   patients Patient[]
 
@@ -108,7 +108,7 @@ model InsuranceDoctor {
 
 model Patient {
   id          String    @id @default(uuid())
-  insuranceId String    @map("insurance_id")
+  insuranceId String?   @map("insurance_id") // Optional - puede no tener mutua asignada
   name        String
   email       String? // Opcional - puede no tener email
   phone       String
@@ -126,7 +126,7 @@ model Patient {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  insurance Insurance @relation(fields: [insuranceId], references: [id])
+  insurance Insurance? @relation(fields: [insuranceId], references: [id])
 
   // Asignación a médicos (puede tener varios médicos)
   assignments PatientAssignment[]
@@ -183,7 +183,7 @@ model PatientMetric {
 model Session {
   id         String        @id @default(uuid())
   patientId  String        @map("patient_id")
-  exerciseId String        @map("exercise_id")
+  exerciseId String?       @map("exercise_id") // Optional - puede no tener ejercicio asignado
   doctorId   String?       @map("doctor_id") // Médico que supervisó
   startedAt  DateTime      @default(now()) @map("started_at")
   endedAt    DateTime?     @map("ended_at")
@@ -198,7 +198,7 @@ model Session {
   progress     Int? // Porcentaje completado
 
   patient  Patient  @relation(fields: [patientId], references: [id])
-  exercise Exercise @relation(fields: [exerciseId], references: [id])
+  exercise Exercise? @relation(fields: [exerciseId], references: [id])
   doctor   Doctor?  @relation(fields: [doctorId], references: [id])
 
   repData         RepData[]
