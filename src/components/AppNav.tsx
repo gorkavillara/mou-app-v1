@@ -1,8 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { Home, Activity, Calendar, User } from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
+import { Home, Activity, Calendar, User, LogOutIcon } from 'lucide-react';
+import { createClient } from '@/lib/supabase';
+
+const supabase = createClient();
 
 const NAV_ITEMS = [
   { href: '/dashboard', icon: Home, label: 'Inicio' },
@@ -13,6 +16,13 @@ const NAV_ITEMS = [
 
 export function AppNav({ active }: { active?: string }) {
   const pathname = usePathname();
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/login');
+    router.refresh();
+  };
 
   return (
     <>
@@ -45,8 +55,14 @@ export function AppNav({ active }: { active?: string }) {
           })}
         </nav>
 
-        <div className="p-4 border-t border-gray-100 text-xs text-gray-400 flex-shrink-0">
-          © Mou · Rehabilitación
+        <div className="p-4 border-t border-gray-100 flex-shrink-0">
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-500 hover:bg-red-50 hover:text-red-600 transition-colors"
+          >
+            <LogOutIcon size={20} strokeWidth={2} />
+            <span className="text-sm font-medium">Cerrar sesión</span>
+          </button>
         </div>
       </aside>
 
