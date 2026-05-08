@@ -1,5 +1,18 @@
 # Mou - Hand Rehabilitation Platform
 
+## ⚠️ Source of truth: Obsidian vault
+
+**Antes de tocar nada en este proyecto, leer `docs/obsidian-vault/`.** Es la fuente de verdad de:
+- Visión, alcance y decisiones (`02-Decisiones-clave.md`).
+- Backlog priorizado (`03-Tareas-Backend.md`, `04-Tareas-Frontend.md`, `05-Tareas-IA.md`).
+- Modelo de datos (`06-Modelo-datos.md`).
+- Plan de piloto y cronograma (`07-Plan-piloto-20-pacientes.md`).
+- Legado a eliminar (`08-Legado-a-eliminar.md`).
+
+Si una decisión cambia → **actualizar el vault primero**, luego implementar. No documentar decisiones sólo en commits o en CLAUDE.md.
+
+Estamos en **Fase 1**: panel doctor + piloto 20 pacientes anónimos. Todo lo previo a este punto (panel admin, mensajería, mutuas, doctor antiguo) está deprecado y se está borrando — ver `08-Legado-a-eliminar.md`.
+
 ## Project Overview
 Mou is a hand/finger rehabilitation platform using MediaPipe for real-time hand tracking via webcam. It serves two roles: patients (exercises, progress tracking) and doctors (patient monitoring, alerts).
 
