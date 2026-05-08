@@ -421,7 +421,7 @@ export function calculateWristAngle(landmarks: Point[], forearmPoint?: Point): n
 // --- Calibration & normalization (IA-03) ---
 // Maps raw measured degrees to the clinical 0–X° range.
 // IMPORTANT: the `measured*` values are placeholders pending validation
-// with Miguel + goniometer (see docs/obsidian-vault/12-Convencion-angular.md).
+// with Javi + goniometer (see docs/obsidian-vault/12-Convencion-angular.md).
 
 export type JointCalibration = {
   measuredOpen: number;

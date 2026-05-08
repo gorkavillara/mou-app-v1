@@ -2,7 +2,7 @@
 
 ## Objetivo
 Tener el sistema en producción y captar el primer paciente real **el viernes 2026-05-15**.
-Llegar a 20 pacientes en las **4-6 semanas siguientes** (Miguel opera ~4-5 pacientes de mano por guardia, varias guardias al mes; sumar lo que aporte un compañero suyo en consulta).
+Llegar a 20 pacientes en las **4-6 semanas siguientes** (Javi opera ~4-5 pacientes de mano por guardia, varias guardias al mes; sumar lo que aporte un compañero suyo en consulta).
 
 ## Cronograma sugerido (8 días laborables)
 
@@ -34,7 +34,7 @@ Llegar a 20 pacientes en las **4-6 semanas siguientes** (Miguel opera ~4-5 pacie
 - F-11: PWA mínima (manifest + meta tags).
 
 ### Día 6 — jueves 2026-05-14
-- IA-03: normalización 0–90°. **Test cara a cara con Miguel y goniómetro.**
+- IA-03: normalización 0–90°. **Test cara a cara con Javi y goniómetro.**
 - F-13/IA-08: indicador en vivo de ángulo.
 - B-10, F-07: discharge.
 - F-14: pantalla de impresión QR.
@@ -42,7 +42,7 @@ Llegar a 20 pacientes en las **4-6 semanas siguientes** (Miguel opera ~4-5 pacie
 ### Día 7 — viernes 2026-05-15 (DEPLOY)
 - 09-12h: deploy a producción (Vercel + Supabase prod), QA en móvil real.
 - 12-14h: bugs encontrados.
-- 16h: **primer paciente real en consulta**. Acompañar a Miguel para verificar el flujo end-to-end.
+- 16h: **primer paciente real en consulta**. Acompañar a Javi para verificar el flujo end-to-end.
 
 ### Semana siguiente
 - B-13, B-14: adherencia + progresión angular.
@@ -55,9 +55,9 @@ Llegar a 20 pacientes en las **4-6 semanas siguientes** (Miguel opera ~4-5 pacie
 | Hito | Fecha objetivo | Acción |
 |---|---|---|
 | Sistema desplegado | 2026-05-15 | Despliegue + QR pruebas |
-| Paciente 1 | 2026-05-15 | Miguel en su próxima cura programada |
-| Pacientes 5 | 2026-05-22 | Compañero de Miguel se suma |
-| Pacientes 10 | 2026-05-29 | Otra guardia de Miguel |
+| Paciente 1 | 2026-05-15 | Javi en su próxima cura programada |
+| Pacientes 5 | 2026-05-22 | Compañero de Javi se suma |
+| Pacientes 10 | 2026-05-29 | Otra guardia de Javi |
 | Pacientes 20 | 2026-06-12 | Listos para mostrar a mutua |
 
 ## Riesgo si se retrasa
@@ -69,7 +69,7 @@ Antes del 15-05 confirmar uno por uno:
 - [ ] Doctor puede loguearse, crear paciente, asignar prescripción y ver QR.
 - [ ] Paciente puede escanear QR, abrir, ver ejercicio, completar sesión y los datos llegan a BD.
 - [ ] Reps se cuentan correctamente (validado con 5 sesiones de prueba personales).
-- [ ] Ángulos son creíbles (mano abierta ≈ 0°, puño ≈ 90° MCP, validado con Miguel).
+- [ ] Ángulos son creíbles (mano abierta ≈ 0°, puño ≈ 90° MCP, validado con Javi).
 - [ ] El doctor ve adherencia básica en su panel (puede ser P1 si va justo, pero al menos sesiones realizadas vs prescritas en bruto).
 - [ ] El sitio funciona en iPhone 12+ y Android medio actualizado, en Safari y Chrome.
 - [ ] Tratamiento se puede finalizar y el QR deja de funcionar.

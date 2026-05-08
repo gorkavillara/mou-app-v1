@@ -12,7 +12,7 @@ Documento técnico que fija para cada articulación medible:
 - **PIP (interfalángica proximal)**: 0° = falange media en línea con proximal. ~100° = flexión completa.
 - **DIP (interfalángica distal)**: 0° = falange distal en línea con media. ~80° = flexión completa.
 
-Validar con Miguel en consulta — él tiene goniómetro y nos puede confirmar. **Sin esta validación el resto del trabajo es ciego.**
+Validar con Javi en consulta — él tiene goniómetro y nos puede confirmar. **Sin esta validación el resto del trabajo es ciego.**
 
 ### IA-02 [P0] Refactor de `src/lib/hand-tracking.ts` para devolver ángulos por articulación
 Actual: calcula un ángulo "de dedo" entre wrist→MCP y MCP→TIP.

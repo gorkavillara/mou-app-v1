@@ -1,14 +1,14 @@
 # 12 — Convención angular (IA-01)
 
 > Documento técnico de referencia para [[05-Tareas-IA#IA-01]] y [[10-Algoritmo-IA-normalizacion]].
-> **Antes de creer en cualquier número del sistema, validar estas convenciones con goniómetro real en consulta con Miguel.**
+> **Antes de creer en cualquier número del sistema, validar estas convenciones con goniómetro real en consulta con Javi.**
 
 ## Resumen
 Para cada articulación medible, fijamos:
 1. La **posición de referencia** (cuándo es 0°).
 2. El **rango clínico esperado** (de 0° a X°).
 3. El **vector que se calcula** sobre los landmarks de MediaPipe.
-4. El **rango medido empíricamente** (lo que devuelve la cámara antes de normalizar — pendiente de calibración con Miguel).
+4. El **rango medido empíricamente** (lo que devuelve la cámara antes de normalizar — pendiente de calibración con Javi).
 
 ## Articulaciones cubiertas
 
@@ -53,7 +53,7 @@ El pulgar tiene cinemática distinta (oposición, abducción, MCP+IP solo). Lo d
 | PIP | falange media recta | 100° | _pendiente_ | no |
 | DIP | falange distal recta | 80° | _pendiente_ | no |
 
-> Los valores **medido empírico** se rellenan en sesión presencial con Miguel + goniómetro + la herramienta `/dev/calibration` (IA-04). No usar la app en producción hasta que esta tabla esté completa.
+> Los valores **medido empírico** se rellenan en sesión presencial con Javi + goniómetro + la herramienta `/dev/calibration` (IA-04). No usar la app en producción hasta que esta tabla esté completa.
 
 ## Algoritmo de normalización
 

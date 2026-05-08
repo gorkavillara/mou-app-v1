@@ -3,8 +3,8 @@
 ## Flujo 1 — Alta de paciente en consulta
 
 ```
-1. Miguel acaba la cura/operación.
-2. Miguel abre el panel doctor en su portátil/tablet.
+1. Javi acaba la cura/operación.
+2. Javi abre el panel doctor en su portátil/tablet.
 3. Click "+ Nuevo paciente".
 4. Introduce external_id (ej. "HC-48721" o "P-17").
 5. Selecciona patología (flexor / extensor / otros).
@@ -14,7 +14,7 @@
 8. Click "Imprimir QR" o muestra el QR en pantalla.
 9. Paciente escanea con el móvil → se abre la URL.
 10. Paciente: "Compartir" → "Añadir a pantalla de inicio".
-11. Miguel asigna prescripciones (ejercicio + dosis).
+11. Javi asigna prescripciones (ejercicio + dosis).
 12. Listo. Próxima visita en 2-3 semanas.
 ```
 
@@ -35,7 +35,7 @@
 ## Flujo 3 — Doctor revisa adherencia
 
 ```
-1. Lunes por la mañana, Miguel abre /doctor.
+1. Lunes por la mañana, Javi abre /doctor.
 2. Lista de 20 pacientes con barra de adherencia.
 3. Tres en rojo (<60%). Click en uno.
 4. Detalle: ve que último login fue hace 4 días.
@@ -47,7 +47,7 @@
 
 ```
 1. Paciente vuelve a consulta a las 3 semanas.
-2. Miguel revisa rango y adherencia con él, en pantalla.
+2. Javi revisa rango y adherencia con él, en pantalla.
 3. Si va bien → click "Finalizar rehabilitación".
 4. Confirma.
 5. URL del paciente queda invalidada (devuelve "tratamiento finalizado").

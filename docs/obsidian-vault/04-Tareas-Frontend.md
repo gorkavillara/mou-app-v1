@@ -89,4 +89,4 @@ Mientras la cámara graba, mostrar overlay: *"Flexión actual: 78°"* — útil 
 Reaprovechar lógica del admin (`cf5866f`).
 
 ### F-16 [P2] Indicador "última sesión hace X horas" en lista de pacientes
-Ayuda a Miguel a ver de un vistazo quién está flojeando.
+Ayuda a Javi a ver de un vistazo quién está flojeando.

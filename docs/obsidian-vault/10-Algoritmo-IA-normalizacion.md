@@ -34,7 +34,7 @@ function fingerAngles(wrist: Point3D, finger: FingerLandmarks) {
 ```
 
 ### Paso 2 — Calibración por convención
-Después de validar empíricamente con Miguel:
+Después de validar empíricamente con Javi:
 
 ```ts
 const CALIBRATION = {
@@ -64,7 +64,7 @@ Sigue siendo sliding window, pero **sobre el ángulo normalizado**, no el crudo.
 ## Validación
 
 ### Antes de creer en los datos
-1. Test cara a cara: Miguel mide con goniómetro real, sistema mide con cámara, comparar 10 posiciones.
+1. Test cara a cara: Javi mide con goniómetro real, sistema mide con cámara, comparar 10 posiciones.
 2. Margen aceptable: ±10° entre los dos. Si es peor, recalibrar.
 3. Repetir test en 3 condiciones de iluminación y 2 distancias de cámara.
 

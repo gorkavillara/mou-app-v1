@@ -4,7 +4,7 @@
 
 ## D1 — Solo panel doctor, sin admin
 **Decisión**: Eliminar el panel de Administrador. El doctor da de alta pacientes directamente.
-**Por qué**: *"Vamos a hacerlo fácil. Vamos a crear solo un panel de doctor que vas a tener tú tu acceso"*. En la Fase 1 solo hay **un doctor** (Miguel). No hace falta multi-rol.
+**Por qué**: *"Vamos a hacerlo fácil. Vamos a crear solo un panel de doctor que vas a tener tú tu acceso"*. En la Fase 1 solo hay **un doctor** (Javi). No hace falta multi-rol.
 
 ## D2 — Acceso protegido con usuario y contraseña
 **Decisión**: El panel del doctor lleva login con user/password.
@@ -33,7 +33,7 @@
 ## D6 — Cierre de tratamiento manual
 **Decisión**: El doctor pulsa un botón **"Finalizar rehabilitación"** desde el panel para cerrar.
 **Por qué**: *"Tendrías que poder desde tu panel dentro de ese paciente decirle: vale, pum, finaliza tratamiento"*.
-**Nota**: En el modelo real (post-piloto) el alta la dará el médico de la mutua, no el cirujano. En Fase 1 lo da Miguel porque es prueba de concepto.
+**Nota**: En el modelo real (post-piloto) el alta la dará el médico de la mutua, no el cirujano. En Fase 1 lo da Javi porque es prueba de concepto.
 
 ## D7 — Onboarding paciente vía URL única + QR
 **Decisión**: Cada paciente recibe una URL única no adivinable. El doctor genera un **QR imprimible** desde el panel. El paciente escanea, abre, y "añadir a pantalla de inicio".

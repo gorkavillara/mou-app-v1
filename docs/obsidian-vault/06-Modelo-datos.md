@@ -11,7 +11,7 @@
 | Campo | Tipo | Notas |
 |---|---|---|
 | `id` | uuid PK | = `auth.users.id` de Supabase Auth |
-| `external_label` | text | "Dr. Miguel" — solo para mostrar en UI |
+| `external_label` | text | "Dr. Javi" — solo para mostrar en UI |
 | `created_at` | timestamptz | |
 
 > En la Fase 1 hay **un único doctor**. Pero modelamos la tabla porque "convertir a multi-doctor después" es trivial si está desde el principio.

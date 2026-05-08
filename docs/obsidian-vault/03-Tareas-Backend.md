@@ -24,7 +24,7 @@ Crear migración con las tablas de [[06-Modelo-datos]]:
 - Política especial: rol `service_role` puede leer/escribir todo (lo usa el endpoint del paciente).
 
 ### B-04 [P0] Seed inicial
-- 1 doctor (Miguel) creado vía Supabase Auth dashboard manualmente.
+- 1 doctor (Javi) creado vía Supabase Auth dashboard manualmente.
 - 2 ejercicios en `exercises` (flexión pasiva dedos, extensión activa dedos).
 
 ## P0 — Auth doctor
@@ -89,12 +89,12 @@ Tabla `audit_log` con: doctor_id, action, target_id, payload (jsonb), created_at
 
 ### B-17 [P1] Documento legal para director médico
 Redactar email + adjunto explicando: qué datos se capturan (ángulos, sin PII), retención (90 días tras discharge), responsable, base legal (interés legítimo / consentimiento del paciente al escanear). [[02-Decisiones-clave#D13]].
-- *Tarea de Arnau, no de Claude. Pero la trackeamos aquí.*
+- *Tarea de Gorka, no de Claude. Pero la trackeamos aquí.*
 
 ## P2 — Nice to have
 
 ### B-18 [P2] Webhook a Slack/email cuando un paciente lleva 48h sin sesión
-Para que Miguel vea un "rojo" sin entrar al panel.
+Para que Javi vea un "rojo" sin entrar al panel.
 
 ### B-19 [P2] Export CSV de un paciente
 Para llevarlo a la reunión con la mutua si toca.

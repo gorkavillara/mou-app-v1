@@ -33,7 +33,7 @@ Si aparece como "Failed to connect", revisar que `SUPABASE_ACCESS_TOKEN` está p
 
 | Tabla | Qué guarda |
 |---|---|
-| `doctors` | 1 fila (Miguel). id = auth.users.id. |
+| `doctors` | 1 fila (Javi). id = auth.users.id. |
 | `exercises` | Catálogo global (2 ejercicios seedeados). |
 | `patients` | Pacientes anónimos (external_id, sin PII). |
 | `prescriptions` | Pauta por paciente (sets×reps×frecuencia×duración). |
@@ -61,13 +61,13 @@ mcp__supabase__list_migrations()
 mcp__supabase__execute_sql(query="select * from public.patients limit 5")
 ```
 
-### Crear el doctor inicial (Miguel)
+### Crear el doctor inicial (Javi)
 
 1. Crear el usuario en Auth desde el dashboard (Authentication → Users → Add user) o vía MCP.
 2. Insertar la fila en `doctors`:
    ```sql
    insert into public.doctors (id, external_label)
-   values ('<uuid-del-user>', 'Dr. Miguel');
+   values ('<uuid-del-user>', 'Dr. Javi');
    ```
 
 ### Regenerar tipos TypeScript

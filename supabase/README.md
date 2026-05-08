@@ -23,7 +23,7 @@ supabase link --project-ref <ref-del-proyecto>
 supabase db push
 ```
 
-## Crear el doctor inicial (Miguel)
+## Crear el doctor inicial (Javi)
 
 Tras aplicar la migración, crear manualmente al doctor desde el dashboard:
 
@@ -31,8 +31,13 @@ Tras aplicar la migración, crear manualmente al doctor desde el dashboard:
 2. Insertar la fila en `doctors`:
    ```sql
    insert into public.doctors (id, external_label)
-   values ('<uuid-del-user-recién-creado>', 'Dr. Miguel');
+   values ('<uuid-del-user-recién-creado>', 'Dr. Javi');
    ```
+
+Alternativa con script local (sin necesidad de abrir el dashboard):
+```bash
+npx tsx scripts/create-doctor.ts --email javi@mou.local --password '<contraseña>' --label 'Dr. Javi'
+```
 
 ## Verificar el seed
 ```sql
