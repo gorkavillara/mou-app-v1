@@ -316,7 +316,160 @@ export function updateRepCounter(counter: RepCounter, angle: number): RepCounter
   return next;
 }
 
-// --- Enhanced ROM: MCP and IF angles ---
+// --- Per-joint angle calculation (Fase 1, IA-02) ---
+// See docs/obsidian-vault/12-Convencion-angular.md for the geometric convention.
+
+export type JointName = 'wrist' | 'MCP' | 'PIP' | 'DIP';
+
+export type JointAngles = {
+  /** Metacarpophalangeal joint (base of finger). 0° = straight, ~90° = flexed to palm. */
+  MCP: number;
+  /** Proximal interphalangeal joint. 0° = straight, ~100° = full flexion. */
+  PIP: number;
+  /** Distal interphalangeal joint (fingertip). 0° = straight, ~80° = full flexion. */
+  DIP: number;
+};
+
+export type FingerJointAngles = Record<FingerName, JointAngles>;
+
+function angleBetweenVectors(
+  ax: number, ay: number, az: number,
+  bx: number, by: number, bz: number,
+): number {
+  const dot = ax * bx + ay * by + az * bz;
+  const magA = Math.sqrt(ax * ax + ay * ay + az * az);
+  const magB = Math.sqrt(bx * bx + by * by + bz * bz);
+  if (magA === 0 || magB === 0) return 0;
+  const cos = Math.max(-1, Math.min(1, dot / (magA * magB)));
+  return Math.acos(cos) * (180 / Math.PI);
+}
+
+/**
+ * Computes MCP, PIP and DIP angles for a single finger.
+ *
+ * - MCP: between wrist→MCP and MCP→PIP. Sign carries flexion (+) / hyperextension (−).
+ * - PIP: between MCP→PIP and PIP→DIP. Always non-negative (PIP cannot hyperextend).
+ * - DIP: between PIP→DIP and DIP→TIP.
+ *
+ * Returned values are RAW measured degrees. Apply `normalizeJointAngle` to map
+ * them to the clinical 0–90° (or 0–100/0–80) range.
+ */
+export function calculateJointAngles(landmarks: Point[], finger: FingerConfig): JointAngles {
+  const wrist = landmarks[0];
+  const mcp = landmarks[finger.mcpIndex];
+  const pip = landmarks[finger.pipIndex];
+  const dip = landmarks[finger.dipIndex];
+  const tip = landmarks[finger.tipIndex];
+
+  // MCP: wrist→MCP versus MCP→PIP. Preserve sign for hyperextension.
+  const a1x = mcp.x - wrist.x, a1y = mcp.y - wrist.y, a1z = mcp.z - wrist.z;
+  const b1x = pip.x - mcp.x,   b1y = pip.y - mcp.y,   b1z = pip.z - mcp.z;
+  const mcpMag = angleBetweenVectors(a1x, a1y, a1z, b1x, b1y, b1z);
+  const mcpCross2D = a1x * b1y - a1y * b1x;
+  const mcpAngle = mcpCross2D >= 0 ? mcpMag : -mcpMag;
+
+  // PIP: MCP→PIP versus PIP→DIP. Magnitude only.
+  const a2x = pip.x - mcp.x,   a2y = pip.y - mcp.y,   a2z = pip.z - mcp.z;
+  const b2x = dip.x - pip.x,   b2y = dip.y - pip.y,   b2z = dip.z - pip.z;
+  const pipAngle = angleBetweenVectors(a2x, a2y, a2z, b2x, b2y, b2z);
+
+  // DIP: PIP→DIP versus DIP→TIP. Magnitude only.
+  const a3x = dip.x - pip.x,   a3y = dip.y - pip.y,   a3z = dip.z - pip.z;
+  const b3x = tip.x - dip.x,   b3y = tip.y - dip.y,   b3z = tip.z - dip.z;
+  const dipAngle = angleBetweenVectors(a3x, a3y, a3z, b3x, b3y, b3z);
+
+  return { MCP: mcpAngle, PIP: pipAngle, DIP: dipAngle };
+}
+
+export function calculateAllJointAngles(landmarks: Point[]): FingerJointAngles {
+  const out = {} as FingerJointAngles;
+  for (const finger of FINGERS) {
+    out[finger.name] = calculateJointAngles(landmarks, finger);
+  }
+  return out;
+}
+
+/**
+ * Wrist flexion/extension angle.
+ *
+ * @param landmarks    The 21 hand landmarks from MediaPipe.
+ * @param forearmPoint Optional virtual forearm reference projected from the wrist
+ *                     opposite to the hand. If omitted, uses wrist→middleMCP as
+ *                     the only reference vector (less reliable; prefer providing it).
+ *                     Positive = palmar flexion, negative = dorsal extension.
+ */
+export function calculateWristAngle(landmarks: Point[], forearmPoint?: Point): number {
+  const wrist = landmarks[0];
+  const middleMCP = landmarks[9];
+
+  if (!forearmPoint) {
+    return 0;
+  }
+
+  const ax = wrist.x - forearmPoint.x;
+  const ay = wrist.y - forearmPoint.y;
+  const az = wrist.z - forearmPoint.z;
+  const bx = middleMCP.x - wrist.x;
+  const by = middleMCP.y - wrist.y;
+  const bz = middleMCP.z - wrist.z;
+
+  const mag = angleBetweenVectors(ax, ay, az, bx, by, bz);
+  const cross2D = ax * by - ay * bx;
+  return cross2D >= 0 ? mag : -mag;
+}
+
+// --- Calibration & normalization (IA-03) ---
+// Maps raw measured degrees to the clinical 0–X° range.
+// IMPORTANT: the `measured*` values are placeholders pending validation
+// with Miguel + goniometer (see docs/obsidian-vault/12-Convencion-angular.md).
+
+export type JointCalibration = {
+  measuredOpen: number;
+  measuredClosed: number;
+  clinicalMax: number;
+  /** Negative bound for joints that hyperextend (wrist, MCP). */
+  clinicalMin?: number;
+};
+
+export const JOINT_CALIBRATION: Record<JointName, JointCalibration> = {
+  wrist: { measuredOpen: 15, measuredClosed: 95,  clinicalMax: 90, clinicalMin: -70 },
+  MCP:   { measuredOpen: 12, measuredClosed: 100, clinicalMax: 90, clinicalMin: -30 },
+  PIP:   { measuredOpen: 10, measuredClosed: 110, clinicalMax: 100 },
+  DIP:   { measuredOpen: 8,  measuredClosed: 95,  clinicalMax: 80 },
+};
+
+/**
+ * Linearly maps a raw measured angle to the clinical range using the joint's
+ * calibration. Values outside the measured envelope are clamped.
+ *
+ * For joints with `clinicalMin` (hyperextension capable), negative inputs are
+ * mapped to the negative side of the clinical range with a separate slope so
+ * that 0° always sits at the neutral position.
+ */
+export function normalizeJointAngle(measuredDeg: number, joint: JointName): number {
+  const cal = JOINT_CALIBRATION[joint];
+  if (measuredDeg >= 0) {
+    const range = cal.measuredClosed - cal.measuredOpen;
+    if (range <= 0) return 0;
+    const clamped = Math.max(cal.measuredOpen, Math.min(cal.measuredClosed, measuredDeg));
+    return ((clamped - cal.measuredOpen) / range) * cal.clinicalMax;
+  }
+  const minClinical = cal.clinicalMin ?? 0;
+  if (minClinical === 0) return 0;
+  const clamped = Math.max(-cal.measuredOpen, measuredDeg);
+  return (clamped / cal.measuredOpen) * Math.abs(minClinical);
+}
+
+export function normalizeFingerJointAngles(raw: JointAngles): JointAngles {
+  return {
+    MCP: normalizeJointAngle(raw.MCP, 'MCP'),
+    PIP: normalizeJointAngle(raw.PIP, 'PIP'),
+    DIP: normalizeJointAngle(raw.DIP, 'DIP'),
+  };
+}
+
+// --- Legacy aliases retained for in-flight callers (to be removed once
+// /exercises is rewired against the new API). ---
 
 export type ROMAngles = {
   mcp: number;
@@ -324,62 +477,15 @@ export type ROMAngles = {
   ifDistal: number;
 };
 
+/** @deprecated use `calculateJointAngles(...).MCP` */
 export function calculateMCPAngle(landmarks: Point[], finger: FingerConfig): number {
-  const wrist = landmarks[0];
-  const mcp = landmarks[finger.mcpIndex];
-  const pip = landmarks[finger.pipIndex];
-
-  const v1 = { x: mcp.x - wrist.x, y: mcp.y - wrist.y, z: mcp.z - wrist.z };
-  const v2 = { x: pip.x - mcp.x, y: pip.y - mcp.y, z: pip.z - mcp.z };
-
-  const dot = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
-  const mag1 = Math.sqrt(v1.x ** 2 + v1.y ** 2 + v1.z ** 2);
-  const mag2 = Math.sqrt(v2.x ** 2 + v2.y ** 2 + v2.z ** 2);
-
-  if (mag1 === 0 || mag2 === 0) return 0;
-
-  const cosAngle = Math.max(-1, Math.min(1, dot / (mag1 * mag2)));
-  const angle = Math.acos(cosAngle) * (180 / Math.PI);
-
-  const cross = v1.x * v2.y - v1.y * v2.x;
-  return cross > 0 ? angle : -angle;
+  return calculateJointAngles(landmarks, finger).MCP;
 }
 
+/** @deprecated use `calculateJointAngles` */
 export function calculateIFAngle(landmarks: Point[], finger: FingerConfig): ROMAngles {
-  const mcp = landmarks[finger.mcpIndex];
-  const pip = landmarks[finger.pipIndex];
-  const dip = landmarks[finger.dipIndex];
-  const tip = landmarks[finger.tipIndex];
-
-  const v1 = { x: pip.x - mcp.x, y: pip.y - mcp.y, z: pip.z - mcp.z };
-  const v2 = { x: dip.x - pip.x, y: dip.y - pip.y, z: dip.z - pip.z };
-  const dot1 = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
-  const mag1_ = Math.sqrt(v1.x ** 2 + v1.y ** 2 + v1.z ** 2);
-  const mag2_ = Math.sqrt(v2.x ** 2 + v2.y ** 2 + v2.z ** 2);
-
-  let ifProximal = 0;
-  if (mag1_ > 0 && mag2_ > 0) {
-    const cosAngle1 = Math.max(-1, Math.min(1, dot1 / (mag1_ * mag2_)));
-    ifProximal = Math.acos(cosAngle1) * (180 / Math.PI);
-  }
-
-  const v3 = { x: dip.x - pip.x, y: dip.y - pip.y, z: dip.z - pip.z };
-  const v4 = { x: tip.x - dip.x, y: tip.y - dip.y, z: tip.z - dip.z };
-  const dot2 = v3.x * v4.x + v3.y * v4.y + v3.z * v4.z;
-  const mag3 = Math.sqrt(v3.x ** 2 + v3.y ** 2 + v3.z ** 2);
-  const mag4 = Math.sqrt(v4.x ** 2 + v4.y ** 2 + v4.z ** 2);
-
-  let ifDistal = 0;
-  if (mag3 > 0 && mag4 > 0) {
-    const cosAngle2 = Math.max(-1, Math.min(1, dot2 / (mag3 * mag4)));
-    ifDistal = Math.acos(cosAngle2) * (180 / Math.PI);
-  }
-
-  return {
-    mcp: calculateMCPAngle(landmarks, finger),
-    ifProximal,
-    ifDistal,
-  };
+  const j = calculateJointAngles(landmarks, finger);
+  return { mcp: j.MCP, ifProximal: j.PIP, ifDistal: j.DIP };
 }
 
 // --- Hand Signature for Identity Validation ---

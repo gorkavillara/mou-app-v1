@@ -22,6 +22,7 @@
 - [[06-Modelo-datos]] — tablas, identificación anónima, esquema Supabase
 - [[09-Flujos-usuario]] — onboarding paciente vía QR, sesión de ejercicios
 - [[10-Algoritmo-IA-normalizacion]] — normalización de grados (0–90°), articulaciones IF
+- [[12-Convencion-angular]] — referencia angular por articulación (IA-01)
 
 ### Backlog por área
 - [[03-Tareas-Backend]] — Supabase, auth doctor, APIs
