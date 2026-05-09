@@ -11,7 +11,12 @@
     "test:watch": "vitest",
     "db:status": "tsx scripts/db-status.ts",
     "db:migrate": "tsx scripts/apply-migrations.ts",
-    "db:migrate:status": "tsx scripts/apply-migrations.ts --status"
+    "db:migrate:status": "tsx scripts/apply-migrations.ts --status",
+    "e2e:bootstrap": "tsx scripts/create-e2e-doctor.ts",
+    "e2e": "npm run e2e:bootstrap && playwright test",
+    "e2e:headed": "npm run e2e:bootstrap && playwright test --headed",
+    "e2e:ui": "npm run e2e:bootstrap && playwright test --ui",
+    "e2e:report": "playwright show-report tests/.report"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.32",
@@ -29,6 +34,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/cli": "^0.1.13",
+    "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",

@@ -46,3 +46,13 @@ select code, name, target_finger from public.exercises;
 --  flexion-pasiva-dedos    | Flexión pasiva de dedos    | all
 --  extension-activa-dedos  | Extensión activa de dedos  | all
 ```
+
+## Doctor para Playwright E2E
+
+La suite E2E (`npm run e2e`) necesita un doctor de pruebas con credenciales conocidas. Es un usuario aparte del real (Dr. Javi):
+
+```bash
+npm run e2e:bootstrap     # crea/actualiza e2e@mou.local con MOU_E2E_PASSWORD
+```
+
+Idempotente: re-ejecutarlo sólo refresca el password del usuario en Auth y vuelve a hacer upsert en `public.doctors`.

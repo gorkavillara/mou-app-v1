@@ -59,13 +59,15 @@ export function NewPatientDialog({ open, onClose }: Props) {
 
     setSubmitting(true);
     try {
+      const body: { external_id: string; pathology_code?: 'flexor' | 'extensor' | 'otros' } = {
+        external_id: id,
+      };
+      if (pathology) body.pathology_code = pathology;
+
       const res = await fetch('/api/doctor/patients', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          external_id: id,
-          pathology_code: pathology || null,
-        }),
+        body: JSON.stringify(body),
       });
 
       if (res.status === 201) {

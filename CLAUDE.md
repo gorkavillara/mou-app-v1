@@ -83,7 +83,25 @@ Per finger: [MCP, PIP, DIP, TIP]
 npm run dev          # Start dev server (Turbopack)
 npm run build        # Production build
 npm run lint         # ESLint
+npm run test         # Vitest unit suite
+npm run e2e          # Playwright e2e (creates e2e doctor + runs all projects)
+npm run e2e:headed   # Playwright e2e with visible browser
+npm run e2e:ui       # Playwright UI mode
+npm run e2e:report   # Open last HTML report under tests/.report
 ```
+
+## E2E tests (Playwright)
+
+- **Config**: `playwright.config.ts`. Runs against `npm run dev` on :3500.
+- **Structure** (one folder per page):
+  - `tests/base-page.ts` — shared Page Object base (navigation, screenshots).
+  - `tests/helpers.ts` — `authedTest` fixture, `generatePatientId`, env constants.
+  - `tests/auth.setup.ts` — logs in as the E2E doctor and saves storageState to `tests/.auth/doctor.json`.
+  - `tests/login/`, `tests/doctor-list/`, `tests/doctor-detail/` — each has `*-page.ts` (POM) + `*.spec.ts` + `*.md`.
+- **Authentication**: `scripts/create-e2e-doctor.ts` (alias `npm run e2e:bootstrap`) idempotently creates `e2e@mou.local` in Supabase Auth + `public.doctors` and resets the password to `MOU_E2E_PASSWORD` from `.env`. The auth.setup project logs that user in via the real form once per run; authed specs reuse that storage state.
+- **Screenshots**: each spec calls `page.snap(testInfo, name)` to write a PNG to `tests/screenshots/<name>.png` AND attach it to the HTML report. Screenshots are committed to git (small, per-page snapshots; useful as a visual reference and for review).
+- **Anonymity rule**: every test patient must use `generatePatientId()` (`E2E-<timestamp>` style). NEVER use real names, emails or PII inside test data.
+- **Skill**: `.claude/skills/playwright-cli/SKILL.md` is installed for interactive browser exploration via `playwright-cli`. Use it during test design before writing assertions.
 
 ## Coding Conventions
 

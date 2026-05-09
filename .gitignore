@@ -41,3 +41,14 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+
+# Playwright artifacts (regenerated on every run)
+/tests/.auth
+/tests/.output
+/tests/.report
+/tests/.snapshots
+/playwright-report
+/test-results
+
+# Per-developer Claude Code permissions (keep .claude/settings.json shared)
+.claude/settings.local.json

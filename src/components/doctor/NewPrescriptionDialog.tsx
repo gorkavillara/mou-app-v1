@@ -123,10 +123,14 @@ export function NewPrescriptionDialog({ patientId, exercises }: Props) {
 
           <div className="px-5 pb-5 space-y-4">
             <div className="space-y-1.5">
-              <label className="block text-[13px] font-medium text-gray-500 ml-1">
+              <label
+                htmlFor="prescription-exercise"
+                className="block text-[13px] font-medium text-gray-500 ml-1"
+              >
                 Ejercicio
               </label>
               <select
+                id="prescription-exercise"
                 value={exerciseId}
                 onChange={(e) => setExerciseId(e.target.value)}
                 className="w-full h-11 px-3 bg-white border border-[#E5E5EA] rounded-[10px] text-[16px] focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF] focus:outline-none"
@@ -157,10 +161,14 @@ export function NewPrescriptionDialog({ patientId, exercises }: Props) {
             </div>
 
             <div className="space-y-1.5">
-              <label className="block text-[13px] font-medium text-gray-500 ml-1">
+              <label
+                htmlFor="prescription-starts-on"
+                className="block text-[13px] font-medium text-gray-500 ml-1"
+              >
                 Inicio
               </label>
               <input
+                id="prescription-starts-on"
                 type="date"
                 value={startsOn}
                 onChange={(e) => setStartsOn(e.target.value)}
@@ -218,10 +226,17 @@ function NumberField({
   min: number;
   onChange: (n: number) => void;
 }) {
+  const id = `nf-${label.replace(/\W+/g, '-').toLowerCase()}`;
   return (
     <div className="space-y-1.5">
-      <label className="block text-[13px] font-medium text-gray-500 ml-1">{label}</label>
+      <label
+        htmlFor={id}
+        className="block text-[13px] font-medium text-gray-500 ml-1"
+      >
+        {label}
+      </label>
       <input
+        id={id}
         type="number"
         inputMode="numeric"
         min={min}

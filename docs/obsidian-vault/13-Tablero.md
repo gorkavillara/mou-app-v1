@@ -5,11 +5,6 @@ mou-board-version: 1
 
 ## 📥 Backlog
 
-- [ ] **B-06** [P0] `POST /api/doctor/patients` (alta paciente + access_token) #backend
-- [ ] **B-07** [P0] `GET /api/doctor/patients` (lista + buscador por external_id) #backend
-- [ ] **B-08** [P0] `GET /api/doctor/patients/:id` (detalle paciente) #backend
-- [ ] **B-09** [P0] `POST /api/doctor/patients/:id/prescriptions` #backend
-- [ ] **B-10** [P0] `POST /api/doctor/patients/:id/discharge` #backend
 - [ ] **B-11** [P0] `GET /api/patient/:token` (vista paciente sin auth) #backend
 - [ ] **B-12** [P0] `POST /api/patient/:token/sessions` (persistir sesión + reps) #backend
 - [ ] **B-13** [P1] Vista/función SQL de adherencia avanzada (7d, total) #backend
@@ -19,12 +14,6 @@ mou-board-version: 1
 - [ ] **B-17** [P1] Documento legal para director médico (Gorka) #backend
 - [ ] **B-18** [P2] Webhook Slack/email cuando paciente lleva 48h sin sesión #backend
 - [ ] **B-19** [P2] Export CSV de un paciente #backend
-- [ ] **F-02** [P0] Layout `/doctor` nuevo (header + dark mode) #frontend
-- [ ] **F-03** [P0] Página `/doctor` lista pacientes con buscador y % adherencia #frontend
-- [ ] **F-04** [P0] Modal "Nuevo paciente" (external_id + patología) #frontend
-- [ ] **F-05** [P0] Página `/doctor/pacientes/[id]` (cabecera, QR, prescripciones, gráficos) #frontend
-- [ ] **F-06** [P0] Form "Añadir prescripción" (sets×reps×freq×días) #frontend
-- [ ] **F-07** [P0] Botón "Finalizar rehabilitación" con confirmación #frontend
 - [ ] **F-08** [P0] Ruta `/p/[token]/page.tsx` con token validation server-side #frontend
 - [ ] **F-09** [P0] Pantalla "qué toca ahora" para el paciente #frontend
 - [ ] **F-10** [P0] Adaptar `exercises/page.tsx` al flujo Fase 1 + POST sesión #frontend
@@ -49,7 +38,7 @@ mou-board-version: 1
 
 ## 🔧 En curso
 
-_(vacío — siguiente: B-06 alta de paciente)_
+_(vacío)_
 
 
 ## 🧪 En revisión
@@ -59,6 +48,20 @@ _(vacío)_
 
 ## ✅ Hecho
 
+- [x] **OPS-Tests-E2E** Suite Playwright (12 specs · chromium-desktop + iPhone 12 · capturas por pantalla en `tests/screenshots/`) ✓ 2026-05-09 #infra
+- [x] **OPS-E2E-Doctor** Bootstrap idempotente del doctor de pruebas (`npm run e2e:bootstrap`) ✓ 2026-05-09 #infra
+- [x] **OPS-A11y** Form labels asociados a inputs (htmlFor) en NewPrescriptionDialog ✓ 2026-05-09 #frontend
+- [x] **B-06** [P0] `POST /api/doctor/patients` (alta paciente + access_token, Zod 4, 409 duplicate) ✓ 2026-05-09 #backend
+- [x] **B-07** [P0] `GET /api/doctor/patients?search=&status=` con join a `patient_adherence` ✓ 2026-05-09 #backend
+- [x] **B-08** [P0] `GET /api/doctor/patients/:id` (paciente + prescripciones + últimas 20 sesiones) ✓ 2026-05-09 #backend
+- [x] **B-09** [P0] `POST /api/doctor/patients/:id/prescriptions` ✓ 2026-05-09 #backend
+- [x] **B-10** [P0] `POST /api/doctor/patients/:id/discharge` (idempotente) ✓ 2026-05-09 #backend
+- [x] **F-02** [P0] Layout `/doctor` (header + logout, DoctorShell) ✓ 2026-05-09 #frontend
+- [x] **F-03** [P0] Página `/doctor` lista pacientes con buscador y barra de adherencia ✓ 2026-05-09 #frontend
+- [x] **F-04** [P0] Modal "Nuevo paciente" (NewPatientDialog) ✓ 2026-05-09 #frontend
+- [x] **F-05** [P0] Página `/doctor/pacientes/[id]` (header, QR, prescripciones, sesiones) ✓ 2026-05-09 #frontend
+- [x] **F-06** [P0] Form "Añadir prescripción" con preview live de reps totales ✓ 2026-05-09 #frontend
+- [x] **F-07** [P0] Botón "Finalizar rehabilitación" + confirmación ✓ 2026-05-09 #frontend
 - [x] **B-05** [P0] Login del doctor (Supabase Auth + middleware + /api/auth/me + /doctor placeholder + logout) ✓ 2026-05-09 #backend
 - [x] **OPS-3** Crear doctor (Javi) en Auth + fila en `public.doctors` ✓ 2026-05-09 #infra
 - [x] **DOC-1** Vault de Obsidian + CLAUDE.md apuntando al vault como source of truth ✓ 2026-05-08 #infra
