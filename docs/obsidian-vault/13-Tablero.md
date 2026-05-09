@@ -1,13 +1,10 @@
 ---
-
 kanban-plugin: board
 mou-board-version: 1
-
 ---
 
 ## 📥 Backlog
 
-- [ ] **B-05** [P0] Login del doctor (Supabase Auth + middleware) #backend
 - [ ] **B-06** [P0] `POST /api/doctor/patients` (alta paciente + access_token) #backend
 - [ ] **B-07** [P0] `GET /api/doctor/patients` (lista + buscador por external_id) #backend
 - [ ] **B-08** [P0] `GET /api/doctor/patients/:id` (detalle paciente) #backend
@@ -52,7 +49,7 @@ mou-board-version: 1
 
 ## 🔧 En curso
 
-- [ ] **OPS-3** Crear doctor (Javi) en Auth + fila en `public.doctors` (esperando password del usuario) #infra
+_(vacío — siguiente: B-06 alta de paciente)_
 
 
 ## 🧪 En revisión
@@ -62,6 +59,8 @@ _(vacío)_
 
 ## ✅ Hecho
 
+- [x] **B-05** [P0] Login del doctor (Supabase Auth + middleware + /api/auth/me + /doctor placeholder + logout) ✓ 2026-05-09 #backend
+- [x] **OPS-3** Crear doctor (Javi) en Auth + fila en `public.doctors` ✓ 2026-05-09 #infra
 - [x] **DOC-1** Vault de Obsidian + CLAUDE.md apuntando al vault como source of truth ✓ 2026-05-08 #infra
 - [x] **DOC-2** Convención angular IA-01 documentada (`12-Convencion-angular.md`) ✓ 2026-05-08 #ia
 - [x] **B-01** Drop del legado de BD (Prisma + 18 tablas viejas) ✓ 2026-05-09 #backend
