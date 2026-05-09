@@ -13,6 +13,17 @@ Si una decisión cambia → **actualizar el vault primero**, luego implementar. 
 
 Estamos en **Fase 1**: panel doctor + piloto 20 pacientes anónimos. Todo lo previo a este punto (panel admin, mensajería, mutuas, doctor antiguo) está deprecado y se está borrando — ver `08-Legado-a-eliminar.md`.
 
+### Mantener el tablero al día
+`docs/obsidian-vault/13-Tablero.md` es un kanban con cuatro columnas: **Backlog · En curso · En revisión · Hecho**. Reglas:
+
+1. **Antes de empezar una tarea**: moverla a *En curso* (mover la línea `- [ ]` a la columna correspondiente).
+2. **Al terminar y antes de pedir review** (o de hacer commit final si no hay review): pasarla a *En revisión* o directamente a *Hecho* si se mergea.
+3. **Al cerrarla**: marcar el checkbox `- [x]` y añadir `✓ YYYY-MM-DD` con la fecha del día.
+4. Si aparece una tarea nueva no listada → añadirla al *Backlog* con un ID coherente (`B-`, `F-`, `IA-`, `OPS-`) y la prioridad entre corchetes (`[P0]`, `[P1]`, `[P2]`).
+5. La tag de área (`#backend`, `#frontend`, `#ia`, `#infra`) es obligatoria — el plugin Kanban las usa para colorear.
+
+El tablero debe reflejar el estado real, no la intención. Si una tarea está parada por bloqueo externo, vuelve al Backlog con una nota del bloqueo, no se queda en *En curso*.
+
 ## Project Overview
 Mou is a hand/finger rehabilitation platform using MediaPipe for real-time hand tracking via webcam. It serves two roles: patients (exercises, progress tracking) and doctors (patient monitoring, alerts).
 

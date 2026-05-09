@@ -6,7 +6,8 @@
 ## 🎯 Estado actual
 - **Fase 0** ✅ Vista de paciente con cámara + MediaPipe (funcional, prototipo)
 - **Fase 1** 🚧 Panel del doctor + piloto real con 20 pacientes
-- **Deadline piloto**: viernes **2026-05-15** (próximo viernes desde hoy 2026-05-08)
+- **Deadline piloto**: viernes **2026-05-15**
+- **Tablero kanban**: ver [[13-Tablero]] para el estado vivo de cada tarea
 
 ## 🗂️ Mapa del vault
 
@@ -32,6 +33,7 @@
 ### Operativa
 - [[07-Plan-piloto-20-pacientes]] — cronograma día a día hasta 2026-05-15
 - [[11-Riesgos-y-bloqueos]] — qué nos puede tirar el piloto
+- **[[13-Tablero]]** — kanban (Backlog · En curso · En revisión · Hecho). **Source of truth del estado de cada tarea**.
 
 ## 🚦 Próxima acción
-Empezar por [[08-Legado-a-eliminar]] — sin tirar el código viejo, las nuevas decisiones se mezclan con prototipos antiguos y todo se contamina.
+Mira [[13-Tablero]] para ver qué hay en curso. Si "En curso" está vacío, coger la tarea P0 más arriba en Backlog.
