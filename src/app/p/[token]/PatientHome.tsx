@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { ArrowRight, Hand } from 'lucide-react';
+import { ExerciseAnimation } from '@/components/exercise-animation';
 import type { PatientHomePayload } from './types';
 
 type Props = {
@@ -101,6 +102,12 @@ export function PatientHome({ token, patient, prescriptions, today }: Props) {
                         {reps} repeticiones
                       </p>
                     </div>
+                    {exercise?.code ? (
+                      <ExerciseAnimation
+                        exerciseCode={exercise.code}
+                        className="h-16 w-16 shrink-0"
+                      />
+                    ) : null}
                   </div>
                   {exercise?.description ? (
                     <p className="mt-3 text-[15px] leading-relaxed text-gray-600">

@@ -581,6 +581,146 @@ export function updateJointRepCounter(
   return next;
 }
 
+// --- Rep coaching (IA-09) ---
+//
+// When the patient closes a rep without reaching a sensible flexion peak (well
+// below the clinical maximum but still high enough to signal a half-hearted
+// rep), we count it as "low". After N consecutive lows we emit a soft hint
+// suggesting they push further — once. The counter resets after the hint fires
+// so it doesn't spam the patient mid-session.
+//
+// Default `threshold = 60` (clinical degrees on the normalized scale): MCP
+// clinical max sits at 90°, so 60° catches reps that look like the patient is
+// only doing half-flexion. Tune against pilot data, not synthetic tests.
+//
+// Default `consecutiveThreshold = 3`: matches the wording in IA-09 ("3 reps
+// consecutivas"). The grace period for first reps lives in the consumer
+// (ExerciseSession).
+
+export type RepCoachingState = {
+  consecutiveLowReps: number;
+  threshold: number;
+  consecutiveThreshold: number;
+};
+
+const DEFAULT_REP_COACHING_THRESHOLD = 60;
+const DEFAULT_REP_COACHING_CONSECUTIVE = 3;
+
+export function createRepCoaching(
+  opts: Partial<RepCoachingState> = {},
+): RepCoachingState {
+  return {
+    consecutiveLowReps: opts.consecutiveLowReps ?? 0,
+    threshold: opts.threshold ?? DEFAULT_REP_COACHING_THRESHOLD,
+    consecutiveThreshold:
+      opts.consecutiveThreshold ?? DEFAULT_REP_COACHING_CONSECUTIVE,
+  };
+}
+
+/**
+ * Records a completed rep and returns the next coaching state plus an optional
+ * suggestion. The suggestion fires when `consecutiveLowReps` reaches the
+ * configured threshold; the counter is reset on fire so the prompt cannot
+ * repeat back-to-back. A non-low rep also resets the counter.
+ */
+export function updateRepCoaching(
+  state: RepCoachingState,
+  completed: { peakFlexion: number },
+): { state: RepCoachingState; suggestion: 'push_more' | null } {
+  const isLow = completed.peakFlexion < state.threshold;
+  if (!isLow) {
+    return {
+      state: { ...state, consecutiveLowReps: 0 },
+      suggestion: null,
+    };
+  }
+  const nextCount = state.consecutiveLowReps + 1;
+  if (nextCount >= state.consecutiveThreshold) {
+    return {
+      state: { ...state, consecutiveLowReps: 0 },
+      suggestion: 'push_more',
+    };
+  }
+  return {
+    state: { ...state, consecutiveLowReps: nextCount },
+    suggestion: null,
+  };
+}
+
+// --- Handedness mismatch detection (IA-11) ---
+//
+// MediaPipe field names vary across builds (`handedness` vs `handednesses`,
+// each as `Array<Array<{ categoryName, score }>>`). We accept either and the
+// inner-array shape, returning a normalized `{ side, score }` or `null` when
+// nothing usable is present.
+
+type HandednessRecord = { categoryName?: string; score?: number };
+
+export type HandednessReading = {
+  side: 'Left' | 'Right';
+  score: number;
+};
+
+export function readHandedness(result: unknown): HandednessReading | null {
+  if (!result || typeof result !== 'object') return null;
+  const r = result as {
+    handednesses?: HandednessRecord[][];
+    handedness?: HandednessRecord[][];
+  };
+  const buckets = r.handednesses ?? r.handedness;
+  if (!Array.isArray(buckets) || buckets.length === 0) return null;
+  const first = buckets[0];
+  if (!Array.isArray(first) || first.length === 0) return null;
+  // Pick the highest-scoring entry in this hand's bucket.
+  let best: HandednessRecord | null = null;
+  for (const entry of first) {
+    if (!entry || typeof entry !== 'object') continue;
+    if (
+      entry.categoryName !== 'Left' &&
+      entry.categoryName !== 'Right'
+    ) {
+      continue;
+    }
+    if (typeof entry.score !== 'number') continue;
+    if (!best || (entry.score ?? 0) > (best.score ?? 0)) best = entry;
+  }
+  if (!best || typeof best.score !== 'number') return null;
+  return {
+    side: best.categoryName as 'Left' | 'Right',
+    score: best.score,
+  };
+}
+
+/**
+ * Aggregates a window of per-frame handedness readings into a single verdict.
+ * Returns `null` if no readings are present. Otherwise returns the dominant
+ * side (mode) and the mean score across the readings whose side matches the
+ * mode — i.e. an "agreement-weighted" confidence.
+ */
+export function summarizeHandednessSamples(
+  samples: HandednessReading[],
+): { side: 'Left' | 'Right'; score: number } | null {
+  if (samples.length === 0) return null;
+  let left = 0;
+  let right = 0;
+  let leftSum = 0;
+  let rightSum = 0;
+  for (const s of samples) {
+    if (s.side === 'Left') {
+      left += 1;
+      leftSum += s.score;
+    } else {
+      right += 1;
+      rightSum += s.score;
+    }
+  }
+  if (left === 0 && right === 0) return null;
+  if (left >= right) {
+    return { side: 'Left', score: left > 0 ? leftSum / left : 0 };
+  }
+  return { side: 'Right', score: right > 0 ? rightSum / right : 0 };
+}
+
 // --- Per-joint angle calculation (Fase 1, IA-02) ---
 // See docs/obsidian-vault/12-Convencion-angular.md for the geometric convention.
 

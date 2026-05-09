@@ -7,15 +7,22 @@ import {
   FINGERS,
   JOINT_CALIBRATION,
   calculateAllJointAngles,
+  createRepCoaching,
   drawHand,
   normalizeJointAngle,
+  readHandedness,
+  summarizeHandednessSamples,
+  updateRepCoaching,
   type FingerJointAngles,
   type FingerStatusMap,
+  type HandednessReading,
   type JointAngles,
   type JointName,
   type Point,
+  type RepCoachingState,
 } from '@/lib/hand-tracking';
 import type { TrackedJoint } from '@/lib/database.types';
+import { ExerciseAnimation } from '@/components/exercise-animation';
 import type {
   CreateSessionPayload,
   PatientPublic,
@@ -51,8 +58,13 @@ type Props = {
 };
 
 // MediaPipe types — kept narrow on purpose (no `any`).
+// Both `handedness` and `handednesses` are listed because the field name
+// has shifted across @mediapipe/tasks-vision releases. `readHandedness`
+// reads whichever one is populated.
 type HandLandmarkerResult = {
   landmarks?: Array<Array<{ x: number; y: number; z: number }>>;
+  handedness?: Array<Array<{ categoryName?: string; score?: number }>>;
+  handednesses?: Array<Array<{ categoryName?: string; score?: number }>>;
 };
 
 type HandLandmarkerInstance = {
@@ -123,6 +135,15 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   const [phase, setPhase] = useState<Phase>('intro');
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const [repCount, setRepCount] = useState(0);
+  // IA-11 — expected hand for this session. We have no DB column yet that
+  // tells us which side was operated; the intro phase exposes a toggle so the
+  // patient can flip it before starting. Default to right.
+  const [expectedHand, setExpectedHand] = useState<'Left' | 'Right'>('Right');
+  // IA-09/IA-11 — single-toast queue. We keep it as a "current toast" string
+  // (or null) plus a numeric key so re-firing the same text re-triggers the
+  // dismiss timer.
+  const [toast, setToast] = useState<{ id: number; text: string } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
   // F-13 display state. Updated via the flush interval, not per frame.
   const [liveAngle, setLiveAngle] = useState(0);
   const [livePeak, setLivePeak] = useState(0);
@@ -153,12 +174,57 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   });
   const repHistoryRef = useRef<RepRecord[]>([]);
 
+  // IA-09 — coaching state for "rep mal hecha". Lives in a ref because the
+  // rAF loop closes a rep without rerendering. We update via the pure helper
+  // so the logic is testable in isolation.
+  const repCoachingRef = useRef<RepCoachingState>(createRepCoaching());
+
+  // IA-11 — handedness sampler. We collect the first N readings where a hand
+  // was detected, summarize once, fire one toast if mismatched, and stop.
+  const HANDEDNESS_SAMPLE_TARGET = 5;
+  const HANDEDNESS_MIN_SCORE = 0.7;
+  const handednessSamplesRef = useRef<HandednessReading[]>([]);
+  const handednessFiredRef = useRef(false);
+  const expectedHandRef = useRef<'Left' | 'Right'>('Right');
+
+  // Keep the ref in sync with the state so the rAF callbacks see the latest
+  // toggle value without rebinding the loop.
+  useEffect(() => {
+    expectedHandRef.current = expectedHand;
+  }, [expectedHand]);
+
   // F-13 display refs. Updated every frame; sampled into state every
   // `DISPLAY_FLUSH_MS` so we don't re-render the React tree per frame.
   const displayHistoryRef = useRef<number[]>([]);
   const displayAngleRef = useRef(0);
   const displayPeakRef = useRef(0);
   const displayPerJointRef = useRef<Partial<Record<TrackedJoint, number>>>({});
+
+  // Show a transient toast. Subsequent calls cancel the previous timer so we
+  // never stack timers on top of one another.
+  const showToast = useCallback((text: string, ms = 3000) => {
+    const id = Date.now();
+    setToast({ id, text });
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast((t) => (t && t.id === id ? null : t));
+      toastTimerRef.current = null;
+    }, ms);
+  }, []);
+
+  const dismissToast = useCallback(() => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+    setToast(null);
+  }, []);
+
+  useEffect(() => () => {
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+  }, []);
 
   const stopStream = useCallback(() => {
     if (streamRef.current) {
