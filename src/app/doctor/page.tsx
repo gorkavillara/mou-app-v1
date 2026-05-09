@@ -1,9 +1,15 @@
 import Link from 'next/link';
 import { differenceInDays } from 'date-fns';
 import { ArrowUpRight } from 'lucide-react';
-import { fetchPatients, type StatusFilter } from '@/lib/doctor-api';
+import {
+  fetchAlerts,
+  fetchPatients,
+  type AlertEntry,
+  type StatusFilter,
+} from '@/lib/doctor-api';
 import { PatientsToolbar } from '@/components/doctor/PatientsToolbar';
 import { AdherenceBar } from '@/components/doctor/AdherenceBar';
+import { LastSessionBadge } from '@/components/doctor/LastSessionBadge';
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -24,10 +30,24 @@ export default async function DoctorPatientsPage({
   const search = asString(sp.search);
   const status = parseStatus(sp.status);
 
-  const { data, status: httpStatus } = await fetchPatients({ search, status });
+  // F-16: GET /api/doctor/alerts returns the doctor's "stale" active
+  // patients (last session older than threshold, capped at 30d by the API
+  // schema, plus patients that have never sessioned). Joining client-side
+  // keeps the patients list endpoint untouched (the parallel backend agent
+  // is busy on B-18/B-19; we can fold this in server-side later). Patients
+  // not in the response either have no active prescription, are
+  // discharged, or sessioned within the threshold (= "al día").
+  const [{ data, status: httpStatus }, { data: alertsData }] = await Promise.all([
+    fetchPatients({ search, status }),
+    fetchAlerts(720),
+  ]);
 
   const isError = !data && httpStatus !== 401;
   const patients = data?.patients ?? [];
+  const alertByPatient = new Map<string, AlertEntry>();
+  for (const a of (alertsData?.patients ?? []) as AlertEntry[]) {
+    alertByPatient.set(a.patient_id, a);
+  }
 
   return (
     <div className="space-y-4">
@@ -54,6 +74,20 @@ export default async function DoctorPatientsPage({
           {patients.map((p) => {
             const days = differenceInDays(new Date(), new Date(p.started_at));
             const discharged = !!p.discharged_at;
+            const totalPct = p.adherence?.total?.pct ?? p.adherence_pct;
+            const weekPct = p.adherence?.week?.pct ?? null;
+            const alert = alertByPatient.get(p.id);
+            // If the patient is in the alerts list, we know their last
+            // session timestamp (or null = never). Otherwise either they have
+            // sessioned recently (good — show "al día") or they have no
+            // active prescription. We can disambiguate via adherence: a
+            // patient with a prescription that is NOT in the stale list
+            // sessioned within 30 days.
+            const hasPrescription = totalPct != null;
+            const lastSessionAt = alert?.last_session_at ?? null;
+            const isFresh = !alert && !hasPrescription;
+            const isOnTrack = !alert && hasPrescription;
+
             return (
               <li key={p.id}>
                 <Link
@@ -73,11 +107,26 @@ export default async function DoctorPatientsPage({
                     </p>
                   </div>
 
-                  <div className="hidden sm:block w-48">
-                    {p.adherence_pct == null ? (
-                      <span className="text-xs text-gray-400">Sin prescripción</span>
+                  <div className="hidden sm:flex flex-col items-stretch w-48 gap-1">
+                    {hasPrescription ? (
+                      <>
+                        <AdherenceBar pct={totalPct as number} />
+                        <span className="text-[11px] text-gray-400 leading-tight">
+                          7 d: {weekPct != null ? `${Math.round(weekPct)}%` : '—'}
+                        </span>
+                        <LastSessionBadge
+                          lastSessionAt={lastSessionAt}
+                          variant={isOnTrack ? 'on-track' : 'stale'}
+                        />
+                      </>
                     ) : (
-                      <AdherenceBar pct={p.adherence_pct} />
+                      <>
+                        <span className="text-xs text-gray-400">Sin prescripción</span>
+                        <LastSessionBadge
+                          lastSessionAt={lastSessionAt}
+                          variant={isFresh ? 'fresh' : 'stale'}
+                        />
+                      </>
                     )}
                   </div>
 
@@ -87,11 +136,28 @@ export default async function DoctorPatientsPage({
                   />
                 </Link>
 
-                <div className="sm:hidden px-4 py-2">
-                  {p.adherence_pct == null ? (
-                    <span className="text-xs text-gray-400">Sin prescripción</span>
+                <div className="sm:hidden px-4 py-2 space-y-1">
+                  {hasPrescription ? (
+                    <>
+                      <AdherenceBar pct={totalPct as number} size="sm" />
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-[11px] text-gray-400">
+                          7 d: {weekPct != null ? `${Math.round(weekPct)}%` : '—'}
+                        </span>
+                        <LastSessionBadge
+                          lastSessionAt={lastSessionAt}
+                          variant={isOnTrack ? 'on-track' : 'stale'}
+                        />
+                      </div>
+                    </>
                   ) : (
-                    <AdherenceBar pct={p.adherence_pct} size="sm" />
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-xs text-gray-400">Sin prescripción</span>
+                      <LastSessionBadge
+                        lastSessionAt={lastSessionAt}
+                        variant={isFresh ? 'fresh' : 'stale'}
+                      />
+                    </div>
                   )}
                 </div>
               </li>

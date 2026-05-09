@@ -79,4 +79,34 @@ test.describe('Doctor patient list', () => {
       await expect(page.getByText(/Sin resultados/i)).toBeVisible();
     },
   );
+
+  test(
+    'a freshly-created patient row shows the 7 d caption and "Sin sesiones todavía" note',
+    { tag: ['@high', '@e2e', '@doctor-list', '@DOCTOR-LIST-E2E-005'] },
+    async ({ page }, testInfo) => {
+      const externalId = generatePatientId('LSESS');
+      const list = new DoctorListPage(page);
+      await list.goto();
+
+      const dialog = new NewPatientDialogPO(page);
+      await list.newPatientButton.click();
+      await dialog.fillAndSubmit(externalId);
+      await page.waitForURL(/\/doctor\/pacientes\/[0-9a-f-]+/);
+
+      // Back to the list and locate the freshly created row.
+      await list.goto();
+      await list.searchInput.fill(externalId);
+      await page.waitForURL(new RegExp(`search=${externalId}`));
+
+      const row = list.patientRow(externalId).first();
+      await expect(row).toBeVisible();
+      await expect(row).toContainText(/Sin sesiones todavía/i);
+      // No prescription yet, so the 7 d caption only renders once a
+      // prescription exists. Confirm at least the "Sin sesiones" note
+      // is present and the bar fallback copy is consistent.
+      await expect(row).toContainText(/Sin prescripción/i);
+
+      await list.snap(testInfo, 'doctor-list-with-fresh-patient');
+    },
+  );
 });

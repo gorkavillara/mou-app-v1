@@ -12,6 +12,25 @@ import type { PathologyCode, TrackedJoint } from './database.types';
 
 export type StatusFilter = 'all' | 'active' | 'discharged';
 
+// --- Adherence breakdown (B-13) -------------------------------------------
+
+export type AdherenceTotal = {
+  completed: number;
+  target: number;
+  pct: number | null;
+};
+
+export type AdherenceWindow = {
+  completed: number;
+  target: number;
+  pct: number | null;
+};
+
+export type AdherenceBreakdown = {
+  total: AdherenceTotal;
+  week: AdherenceWindow;
+};
+
 // --- List ------------------------------------------------------------------
 
 export type PatientListItem = {
@@ -20,9 +39,12 @@ export type PatientListItem = {
   pathology_code: PathologyCode | null;
   started_at: string;
   discharged_at: string | null;
+  // Backwards-compatible top-level fields (the list UI used these directly
+  // before B-13). New components should read `adherence` instead.
   adherence_pct: number | null;
   completed_sessions: number;
   expected_sessions: number;
+  adherence: AdherenceBreakdown;
 };
 
 export type PatientListResponse = {
@@ -64,10 +86,17 @@ export type SessionRow = {
   prescription: { id: string; exercise: ExerciseSummary | null } | null;
 };
 
+/**
+ * The detail endpoint preserves the legacy flat shape (completed_sessions,
+ * expected_sessions, adherence_pct) and adds the structured `total` + `week`
+ * breakdown alongside. UI should prefer the structured form.
+ */
 export type AdherenceRow = {
   completed_sessions: number;
   expected_sessions: number;
   adherence_pct: number;
+  total: AdherenceTotal;
+  week: AdherenceWindow;
 };
 
 export type PatientDetail = {
@@ -86,6 +115,43 @@ export type PatientDetailResponse = {
   prescriptions: PrescriptionRow[];
   sessions: SessionRow[];
   adherence: AdherenceRow | null;
+};
+
+// --- Progression (B-14) ----------------------------------------------------
+
+export type ProgressionPoint = {
+  day: string;
+  max_flexion: number | null;
+  max_extension: number | null;
+  samples: number;
+};
+
+export type ProgressionSeries = {
+  joint: string;
+  points: ProgressionPoint[];
+};
+
+export type ProgressionResponse = {
+  from: string;
+  to: string;
+  series: ProgressionSeries[];
+};
+
+// --- Alerts (B-18, last_session_at side-data) -----------------------------
+
+export type AlertEntry = {
+  patient_id: string;
+  external_id: string;
+  pathology_code: PathologyCode | null;
+  last_session_at: string | null;
+  hours_since_last: number;
+  has_ever_session: boolean;
+};
+
+export type AlertsResponse = {
+  threshold_hours: number;
+  generated_at: string;
+  patients: AlertEntry[];
 };
 
 // --- Internals -------------------------------------------------------------
@@ -128,6 +194,42 @@ export async function fetchPatientDetail(
   id: string,
 ): Promise<{ data: PatientDetailResponse | null; status: number }> {
   return doctorFetch<PatientDetailResponse>(`/api/doctor/patients/${encodeURIComponent(id)}`);
+}
+
+/**
+ * B-14 — patient progression series. `from`/`to` are inclusive YYYY-MM-DD
+ * strings; if omitted, the API defaults to the patient's `started_at` and
+ * today, respectively.
+ */
+export async function fetchPatientProgression(
+  id: string,
+  params: { from?: string; to?: string; joint?: string[] } = {},
+): Promise<{ data: ProgressionResponse | null; status: number }> {
+  const qs = new URLSearchParams();
+  if (params.from) qs.set('from', params.from);
+  if (params.to) qs.set('to', params.to);
+  for (const j of params.joint ?? []) qs.append('joint', j);
+  const suffix = qs.toString();
+  return doctorFetch<ProgressionResponse>(
+    `/api/doctor/patients/${encodeURIComponent(id)}/progression${suffix ? `?${suffix}` : ''}`,
+  );
+}
+
+/**
+ * B-18 — fetches "stale" patients for F-16 (last session indicator on the
+ * list). The endpoint only returns patients whose last session is older than
+ * `threshold_hours` (or who have no session at all) AND who have at least one
+ * active prescription. We use the schema-allowed maximum (720h ≈ 30 days),
+ * which is more than enough for the pilot window. Patients NOT in the
+ * response are either "fresh" (no prescription) or "healthy" (sessioned
+ * within the window) — we infer that on the page.
+ */
+export async function fetchAlerts(
+  thresholdHours = 720,
+): Promise<{ data: AlertsResponse | null; status: number }> {
+  return doctorFetch<AlertsResponse>(
+    `/api/doctor/alerts?threshold_hours=${thresholdHours}`,
+  );
 }
 
 /**

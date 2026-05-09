@@ -8,10 +8,14 @@ import {
   buildPatientAccessUrl,
   fetchExercisesCatalog,
   fetchPatientDetail,
+  fetchPatientProgression,
   type AdherenceRow,
+  type AdherenceTotal,
+  type AdherenceWindow,
   type ExerciseSummary,
   type PatientDetail,
   type PrescriptionRow,
+  type ProgressionResponse,
   type SessionRow,
 } from '@/lib/doctor-api';
 import { AdherenceBar } from '@/components/doctor/AdherenceBar';
@@ -19,14 +23,19 @@ import { DischargeButton } from '@/components/doctor/DischargeButton';
 import { NewPrescriptionDialog } from '@/components/doctor/NewPrescriptionDialog';
 import { CopyUrlButton, PrintButton } from '@/components/doctor/PatientAccessActions';
 import { PrintableQRSheet } from '@/components/doctor/PrintableQRSheet';
+import { ProgressionChart } from '@/components/doctor/ProgressionChart';
 
 type Params = Promise<{ id: string }>;
 
 export default async function PatientDetailPage({ params }: { params: Params }) {
   const { id } = await params;
-  const [{ data, status }, exercises] = await Promise.all([
+  // Progression call shares the page render. The API handles
+  // from = patient.started_at, to = today defaults server-side, so we don't
+  // need to thread params through unless the doctor narrows the window.
+  const [{ data, status }, exercises, { data: progression }] = await Promise.all([
     fetchPatientDetail(id),
     fetchExercisesCatalog(),
+    fetchPatientProgression(id),
   ]);
 
   if (status === 404) notFound();
@@ -68,6 +77,8 @@ export default async function PatientDetailPage({ params }: { params: Params }) 
         />
 
         <AdherenceSection adherence={adherence} />
+
+        <ProgressionSection progression={progression} />
 
         <SessionsSection sessions={sessions} />
       </div>
@@ -256,24 +267,13 @@ function AdherenceSection({ adherence }: { adherence: AdherenceRow | null }) {
   return (
     <Section title="Adherencia">
       {adherence ? (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <AdherenceCard
-            label="Adherencia"
-            pct={adherence.adherence_pct}
-            sub={`${adherence.completed_sessions}/${adherence.expected_sessions} sesiones`}
-          />
-          <AdherenceCard
-            label="Completadas"
-            pct={null}
-            value={adherence.completed_sessions.toString()}
-            sub="sesiones realizadas"
-          />
-          <AdherenceCard
-            label="Esperadas"
-            pct={null}
-            value={adherence.expected_sessions.toString()}
-            sub="hasta hoy"
-          />
+        // B-13 / D12: total adherence is the headline number ("¿está
+        // cumpliendo su tratamiento?"); the last-7-days view is the early
+        // warning ("¿se está enfriando esta semana?"). Two cards side by side
+        // on desktop, stacked on mobile.
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <AdherenceCard label="Total" {...cardPropsFor(adherence.total)} />
+          <AdherenceCard label="Últimos 7 días" {...cardPropsFor(adherence.week)} />
         </div>
       ) : (
         <p className="text-sm text-gray-500">
@@ -284,30 +284,46 @@ function AdherenceSection({ adherence }: { adherence: AdherenceRow | null }) {
   );
 }
 
+function cardPropsFor(window: AdherenceTotal | AdherenceWindow): {
+  pct: number | null;
+  sub: string;
+} {
+  return {
+    pct: window.pct,
+    sub: `${window.completed}/${window.target} sesiones`,
+  };
+}
+
 function AdherenceCard({
   label,
   pct,
-  value,
   sub,
 }: {
   label: string;
   pct: number | null;
-  value?: string;
   sub: string;
 }) {
   return (
-    <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
+    <div className="rounded-xl bg-gray-50 border border-gray-100 p-4">
       <p className="text-[11px] uppercase tracking-wide text-gray-500">{label}</p>
-      <p className="text-xl font-semibold tabular-nums text-gray-900 mt-1">
-        {pct != null ? `${Math.round(pct)}%` : (value ?? '—')}
+      <p className="text-2xl font-semibold tabular-nums text-gray-900 mt-1">
+        {pct != null ? `${Math.round(pct)}%` : '—'}
       </p>
       <p className="text-xs text-gray-500 mt-0.5">{sub}</p>
       {pct != null && (
-        <div className="mt-2">
-          <AdherenceBar pct={pct} showLabel={false} size="sm" />
+        <div className="mt-3">
+          <AdherenceBar pct={pct} showLabel={false} />
         </div>
       )}
     </div>
+  );
+}
+
+function ProgressionSection({ progression }: { progression: ProgressionResponse | null }) {
+  return (
+    <Section title="Progresión angular">
+      <ProgressionChart data={progression} />
+    </Section>
   );
 }
 
