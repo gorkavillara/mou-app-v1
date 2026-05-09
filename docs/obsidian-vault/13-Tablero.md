@@ -5,19 +5,12 @@ mou-board-version: 1
 
 ## 📥 Backlog
 
-- [ ] **B-11** [P0] `GET /api/patient/:token` (vista paciente sin auth) #backend
-- [ ] **B-12** [P0] `POST /api/patient/:token/sessions` (persistir sesión + reps) #backend
 - [ ] **B-13** [P1] Vista/función SQL de adherencia avanzada (7d, total) #backend
 - [ ] **B-14** [P1] `GET /api/doctor/patients/:id/progression` (serie temporal por articulación) #backend
-- [ ] **B-15** [P1] Endpoint que devuelve QR como PNG #backend
 - [ ] **B-16** [P1] Tabla `audit_log` + triggers en patients/prescriptions/discharge #backend
 - [ ] **B-17** [P1] Documento legal para director médico (Gorka) #backend
 - [ ] **B-18** [P2] Webhook Slack/email cuando paciente lleva 48h sin sesión #backend
 - [ ] **B-19** [P2] Export CSV de un paciente #backend
-- [ ] **F-08** [P0] Ruta `/p/[token]/page.tsx` con token validation server-side #frontend
-- [ ] **F-09** [P0] Pantalla "qué toca ahora" para el paciente #frontend
-- [ ] **F-10** [P0] Adaptar `exercises/page.tsx` al flujo Fase 1 + POST sesión #frontend
-- [ ] **F-11** [P0] PWA mínima (manifest + meta Apple) #frontend
 - [ ] **F-12** [P1] Componente `<ExerciseAnimation>` con mano animada #frontend
 - [ ] **F-13** [P1] Indicador en vivo del ángulo durante el ejercicio #frontend
 - [ ] **F-14** [P1] Pantalla de impresión QR (CSS @media print) #frontend
@@ -48,6 +41,15 @@ _(vacío)_
 
 ## ✅ Hecho
 
+- [x] **B-11** [P0] `GET /api/patient/:token` (vista paciente vía service_role, 410 al alta, today.sessions_target) ✓ 2026-05-09 #backend
+- [x] **B-12** [P0] `POST /api/patient/:token/sessions` (sesión + rep_measurements, validación cross-paciente) ✓ 2026-05-09 #backend
+- [x] **B-15** [P1] `GET /api/doctor/patients/:id/qr.png` (PNG con `qrcode`, NEXT_PUBLIC_APP_URL > origin) ✓ 2026-05-09 #backend
+- [x] **F-08** [P0] Ruta `/p/[token]` server-rendered con notFound/410/200 ✓ 2026-05-09 #frontend
+- [x] **F-09** [P0] PatientHome con "Sesión X de Y" y cards de prescripciones ✓ 2026-05-09 #frontend
+- [x] **F-10** [P0] ExerciseSession (intro→running→done) con MediaPipe dinámico, conteo de reps, POST sesión ✓ 2026-05-09 #frontend
+- [x] **F-11** [P0] PWA mínima (manifest + Apple meta + iconos placeholder) ✓ 2026-05-09 #frontend
+- [x] **DB-base64url** Migración `access_token` a base64url para URLs limpias ✓ 2026-05-09 #infra
+- [x] **PATIENT-E2E-001** Test e2e end-to-end del flujo paciente (alta → URL → home → intro) ✓ 2026-05-09 #infra
 - [x] **OPS-Tests-E2E** Suite Playwright (12 specs · chromium-desktop + iPhone 12 · capturas por pantalla en `tests/screenshots/`) ✓ 2026-05-09 #infra
 - [x] **OPS-E2E-Doctor** Bootstrap idempotente del doctor de pruebas (`npm run e2e:bootstrap`) ✓ 2026-05-09 #infra
 - [x] **OPS-A11y** Form labels asociados a inputs (htmlFor) en NewPrescriptionDialog ✓ 2026-05-09 #frontend
