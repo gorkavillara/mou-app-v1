@@ -117,3 +117,21 @@ export const progressionQuerySchema = z
   );
 
 export type ProgressionQuery = z.infer<typeof progressionQuerySchema>;
+
+/**
+ * Query schema for GET /api/doctor/alerts (B-18).
+ *
+ * `threshold_hours` defaults to 48 (2 days, the value the panel will use by
+ * default). Bound at [1, 720] (30 days) to keep the function cheap and avoid
+ * pathological inputs.
+ */
+export const alertsQuerySchema = z.object({
+  threshold_hours: z.coerce
+    .number()
+    .int()
+    .min(1, { error: 'threshold_hours must be >= 1' })
+    .max(720, { error: 'threshold_hours must be <= 720' })
+    .default(48),
+});
+
+export type AlertsQuery = z.infer<typeof alertsQuerySchema>;

@@ -192,6 +192,21 @@ export interface Database {
           samples: number;
         }[];
       };
+      // B-18
+      stale_patients: {
+        Args: {
+          p_doctor_id: string;
+          p_threshold_hours: number;
+        };
+        Returns: {
+          patient_id: string;
+          external_id: string;
+          pathology_code: string | null;
+          last_session_at: string | null;
+          hours_since_last: number;
+          has_ever_session: boolean;
+        }[];
+      };
     };
   };
 }
