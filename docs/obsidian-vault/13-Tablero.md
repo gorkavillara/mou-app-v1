@@ -5,20 +5,12 @@ mou-board-version: 1
 
 ## 📥 Backlog
 
-- [ ] **B-13** [P1] Vista/función SQL de adherencia avanzada (7d, total) #backend
-- [ ] **B-14** [P1] `GET /api/doctor/patients/:id/progression` (serie temporal por articulación) #backend
-- [ ] **B-16** [P1] Tabla `audit_log` + triggers en patients/prescriptions/discharge #backend
 - [ ] **B-17** [P1] Documento legal para director médico (Gorka) #backend
 - [ ] **B-18** [P2] Webhook Slack/email cuando paciente lleva 48h sin sesión #backend
 - [ ] **B-19** [P2] Export CSV de un paciente #backend
 - [ ] **F-12** [P1] Componente `<ExerciseAnimation>` con mano animada #frontend
-- [ ] **F-13** [P1] Indicador en vivo del ángulo durante el ejercicio #frontend
-- [ ] **F-14** [P1] Pantalla de impresión QR (CSS @media print) #frontend
 - [ ] **F-15** [P2] Modo oscuro completo en panel doctor #frontend
 - [ ] **F-16** [P2] Indicador "última sesión hace X horas" en lista #frontend
-- [ ] **IA-04** [P0] Página `/dev/calibration` (test visual de cordura) #ia
-- [ ] **IA-05** [P0] Revisar conteo de reps con los nuevos ángulos por articulación #ia
-- [ ] **IA-06** [P0] Filtrado de mediciones inválidas (low_visibility, low_confidence) #ia
 - [ ] **IA-07** [P1] Producción de 2 animaciones Lottie/GIF de mano #ia
 - [ ] **IA-08** [P1] Indicador en vivo de ángulo durante ejercicio #ia
 - [ ] **IA-09** [P1] Detección de "ejercicio mal hecho" + aviso #ia
@@ -41,6 +33,14 @@ _(vacío)_
 
 ## ✅ Hecho
 
+- [x] **B-13** [P1] Adherencia 7d/total: `patient_adherence_window(N)` + view `patient_adherence_breakdown` ✓ 2026-05-09 #backend
+- [x] **B-14** [P1] `GET /api/doctor/patients/:id/progression` (function `patient_progression`, filtra low_*) ✓ 2026-05-09 #backend
+- [x] **B-16** [P1] `audit_log` + triggers en patients (insert + discharge) y prescriptions (insert) ✓ 2026-05-09 #backend
+- [x] **F-13** [P1] Indicador HUD en vivo del ángulo + mini-bars por articulación durante el ejercicio ✓ 2026-05-09 #frontend
+- [x] **F-14** [P1] Hoja A4 imprimible con QR (`PrintableQRSheet` + `print:hidden` en el resto) ✓ 2026-05-09 #frontend
+- [x] **IA-04** [P0] Página `/dev/calibration` con captura de referencia + JSON pegable ✓ 2026-05-09 #ia
+- [x] **IA-05** [P0] Rep counter con histéresis (35°/10°), suavizado 8 frames, peaks por articulación ✓ 2026-05-09 #ia
+- [x] **IA-06** [P0] Quality flags `clean/low_confidence/low_visibility/partial` (`classifyRepQuality`) ✓ 2026-05-09 #ia
 - [x] **B-11** [P0] `GET /api/patient/:token` (vista paciente vía service_role, 410 al alta, today.sessions_target) ✓ 2026-05-09 #backend
 - [x] **B-12** [P0] `POST /api/patient/:token/sessions` (sesión + rep_measurements, validación cross-paciente) ✓ 2026-05-09 #backend
 - [x] **B-15** [P1] `GET /api/doctor/patients/:id/qr.png` (PNG con `qrcode`, NEXT_PUBLIC_APP_URL > origin) ✓ 2026-05-09 #backend
