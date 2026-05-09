@@ -21,7 +21,7 @@ export function DoctorShell({ doctor, children }: { doctor: Doctor; children: Re
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
-      <header className="bg-white border-b border-gray-100 sticky top-0 z-10">
+      <header className="bg-white border-b border-gray-100 sticky top-0 z-10 print:hidden">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="text-lg font-semibold tracking-tight">Mou</span>

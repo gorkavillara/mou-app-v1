@@ -18,6 +18,7 @@ import { AdherenceBar } from '@/components/doctor/AdherenceBar';
 import { DischargeButton } from '@/components/doctor/DischargeButton';
 import { NewPrescriptionDialog } from '@/components/doctor/NewPrescriptionDialog';
 import { CopyUrlButton, PrintButton } from '@/components/doctor/PatientAccessActions';
+import { PrintableQRSheet } from '@/components/doctor/PrintableQRSheet';
 
 type Params = Promise<{ id: string }>;
 
@@ -47,28 +48,36 @@ export default async function PatientDetailPage({ params }: { params: Params }) 
   const discharged = !!patient.discharged_at;
 
   return (
-    <div className="space-y-6">
-      <BackLink />
+    <>
+      <div className="space-y-6 print:hidden">
+        <BackLink />
 
-      <Header
+        <Header
+          externalId={patient.external_id}
+          days={days}
+          discharged={discharged}
+          patientId={patient.id}
+        />
+
+        <AccessSection patient={patient} accessUrl={accessUrl} />
+
+        <PrescriptionsSection
+          prescriptions={prescriptions}
+          patientId={patient.id}
+          exercises={exercises}
+        />
+
+        <AdherenceSection adherence={adherence} />
+
+        <SessionsSection sessions={sessions} />
+      </div>
+
+      <PrintableQRSheet
         externalId={patient.external_id}
-        days={days}
-        discharged={discharged}
-        patientId={patient.id}
+        qrSrc={`/api/doctor/patients/${patient.id}/qr.png`}
+        issuedAt={patient.started_at}
       />
-
-      <AccessSection patient={patient} accessUrl={accessUrl} />
-
-      <PrescriptionsSection
-        prescriptions={prescriptions}
-        patientId={patient.id}
-        exercises={exercises}
-      />
-
-      <AdherenceSection adherence={adherence} />
-
-      <SessionsSection sessions={sessions} />
-    </div>
+    </>
   );
 }
 

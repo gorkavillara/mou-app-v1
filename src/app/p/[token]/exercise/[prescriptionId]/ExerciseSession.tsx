@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Camera, CheckCircle2, RotateCcw } from 'lucide-react';
 import {
   FINGERS,
+  JOINT_CALIBRATION,
   calculateAllJointAngles,
   drawHand,
   normalizeJointAngle,
@@ -68,6 +69,14 @@ const HAND_LANDMARKER_MODEL_URL =
 const REP_FLEXION_THRESHOLD = 35; // entering "flexion" zone
 const REP_EXTENSION_THRESHOLD = 10; // returning to "open" zone
 const SMOOTHING_WINDOW = 8;
+// Separate smoothing window for the on-screen indicator (F-13). Smaller than
+// the rep-counter window so the displayed value tracks motion responsively
+// without affecting the rep detection logic.
+const DISPLAY_SMOOTHING_WINDOW = 5;
+// React state flush interval for the indicator. The rAF loop fills refs at
+// ~30 fps; we sample those refs into state here so the UI doesn't re-render
+// every frame.
+const DISPLAY_FLUSH_MS = 150;
 
 // All fingers normal — patient view doesn't expose finger-status overrides.
 const ALL_NORMAL: FingerStatusMap = {
@@ -114,7 +123,10 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   const [phase, setPhase] = useState<Phase>('intro');
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const [repCount, setRepCount] = useState(0);
-  const [liveMcp, setLiveMcp] = useState(0);
+  // F-13 display state. Updated via the flush interval, not per frame.
+  const [liveAngle, setLiveAngle] = useState(0);
+  const [livePeak, setLivePeak] = useState(0);
+  const [livePerJoint, setLivePerJoint] = useState<Partial<Record<TrackedJoint, number>>>({});
   const [submitState, setSubmitState] = useState<'idle' | 'pending' | 'ok' | 'error'>('idle');
   const [summary, setSummary] = useState<{
     perJoint: Partial<Record<TrackedJoint, { avgFlex: number; avgExt: number }>>;
@@ -140,6 +152,13 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     framesMissing: 0,
   });
   const repHistoryRef = useRef<RepRecord[]>([]);
+
+  // F-13 display refs. Updated every frame; sampled into state every
+  // `DISPLAY_FLUSH_MS` so we don't re-render the React tree per frame.
+  const displayHistoryRef = useRef<number[]>([]);
+  const displayAngleRef = useRef(0);
+  const displayPeakRef = useRef(0);
+  const displayPerJointRef = useRef<Partial<Record<TrackedJoint, number>>>({});
 
   const stopStream = useCallback(() => {
     if (streamRef.current) {
@@ -171,6 +190,37 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
 
   // Cleanup on unmount.
   useEffect(() => () => teardown(), [teardown]);
+
+  // F-13 — periodic flush of display refs into state. Only runs while the
+  // session is in the `running` phase. We schedule via setInterval so it's
+  // independent of the rAF cadence; if the browser supports
+  // `requestIdleCallback` the cost is even smaller, but setInterval is
+  // sufficient at 150ms.
+  useEffect(() => {
+    if (phase !== 'running') return;
+    const id = window.setInterval(() => {
+      const angle = Math.round(displayAngleRef.current);
+      const peak = Math.round(displayPeakRef.current);
+      // Snapshot per-joint values; rounding here so equality checks below are
+      // cheap and we avoid spurious re-renders from floating noise.
+      const next: Partial<Record<TrackedJoint, number>> = {};
+      for (const joint of trackedJoints) {
+        const v = displayPerJointRef.current[joint];
+        if (v != null) next[joint] = Math.round(v);
+      }
+      setLiveAngle((prev) => (prev === angle ? prev : angle));
+      setLivePeak((prev) => (prev === peak ? prev : peak));
+      setLivePerJoint((prev) => {
+        // Only update if at least one entry changed; cheap shallow check.
+        let changed = false;
+        for (const joint of trackedJoints) {
+          if ((prev[joint] ?? null) !== (next[joint] ?? null)) { changed = true; break; }
+        }
+        return changed ? next : prev;
+      });
+    }, DISPLAY_FLUSH_MS);
+    return () => window.clearInterval(id);
+  }, [phase, trackedJoints]);
 
   // Pause loop when tab is hidden.
   useEffect(() => {
@@ -241,12 +291,31 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
           ? driverSamples.reduce((a, b) => a + b, 0) / driverSamples.length
           : 0;
 
-      // Smoothing window.
+      // Smoothing window for rep detection (heavier — 8 frames).
       const hist = angleHistoryRef.current;
       hist.push(driverAvg);
       if (hist.length > SMOOTHING_WINDOW) hist.shift();
       const smoothed = hist.reduce((a, b) => a + b, 0) / hist.length;
-      setLiveMcp(Math.round(smoothed));
+
+      // Display smoothing (lighter — 5 frames). Independent so UI tracks
+      // motion responsively without slowing rep edges.
+      const dispHist = displayHistoryRef.current;
+      dispHist.push(driverAvg);
+      if (dispHist.length > DISPLAY_SMOOTHING_WINDOW) dispHist.shift();
+      const displaySmoothed = dispHist.reduce((a, b) => a + b, 0) / dispHist.length;
+      displayAngleRef.current = displaySmoothed;
+      const absDisplay = Math.abs(displaySmoothed);
+      if (absDisplay > displayPeakRef.current) displayPeakRef.current = absDisplay;
+
+      // Per-joint display values: average smoothing per joint isn't needed
+      // (these are already averaged across fingers). We just write the
+      // latest sample.
+      for (const joint of trackedJoints) {
+        const samples = perJointSamples[joint];
+        if (!samples || samples.length === 0) continue;
+        const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
+        displayPerJointRef.current[joint] = avg;
+      }
 
       // Rep edge detection: only count once flexion threshold is crossed,
       // then we wait for a return to the open zone before counting.
@@ -270,6 +339,8 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
           framesMissing: 0,
         };
         directionRef.current = 'open';
+        // Reset the displayed "peak this rep" so the indicator resets too.
+        displayPeakRef.current = 0;
 
         if (repCountRef.current >= targetReps) {
           finishSession();
@@ -528,7 +599,14 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
       framesTotal: 0,
       framesMissing: 0,
     };
+    displayHistoryRef.current = [];
+    displayAngleRef.current = 0;
+    displayPeakRef.current = 0;
+    displayPerJointRef.current = {};
     setRepCount(0);
+    setLiveAngle(0);
+    setLivePeak(0);
+    setLivePerJoint({});
     scheduleNextFrame();
   }, [scheduleNextFrame, teardown]);
 
@@ -538,10 +616,34 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   const driverJoint: TrackedJoint =
     trackedJoints.find((j) => j === 'MCP') ?? trackedJoints[0];
 
-  const arcPct = useMemo(() => {
-    const max = driverJoint === 'PIP' ? 100 : driverJoint === 'DIP' ? 80 : 90;
-    return Math.max(0, Math.min(100, (Math.abs(liveMcp) / max) * 100));
-  }, [liveMcp, driverJoint]);
+  // Clinical max for the driver joint, used to fill the horizontal bar.
+  // `wrist` shares the same calibration record but isn't driven by finger
+  // landmarks here; we still fall back to 90° to avoid a divide-by-zero.
+  const driverClinicalMax =
+    driverJoint === 'wrist'
+      ? JOINT_CALIBRATION.wrist.clinicalMax
+      : driverJoint === 'PIP'
+        ? JOINT_CALIBRATION.PIP.clinicalMax
+        : driverJoint === 'DIP'
+          ? JOINT_CALIBRATION.DIP.clinicalMax
+          : JOINT_CALIBRATION.MCP.clinicalMax;
+  const positiveFillPct =
+    liveAngle > 0
+      ? Math.min(100, (liveAngle / Math.max(1, driverClinicalMax)) * 100)
+      : 0;
+  // For hyperextension we render a small red sliver pointing left. We use the
+  // joint's `clinicalMin` (when defined) as the negative scale.
+  const negativeMin =
+    driverJoint === 'wrist'
+      ? Math.abs(JOINT_CALIBRATION.wrist.clinicalMin ?? 0)
+      : driverJoint === 'MCP'
+        ? Math.abs(JOINT_CALIBRATION.MCP.clinicalMin ?? 0)
+        : 0;
+  const negativeFillPct =
+    liveAngle < 0 && negativeMin > 0
+      ? Math.min(100, (Math.abs(liveAngle) / negativeMin) * 100)
+      : 0;
+  const showJointStrip = trackedJoints.length > 1;
 
   if (phase === 'intro') {
     return (
@@ -616,7 +718,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
         {/* HUD */}
         <div className="relative z-10 flex h-screen flex-col">
           <div className="px-5 pt-6">
-            <div className="flex items-start justify-between">
+            <div className="flex items-start justify-between gap-3">
               <div className="rounded-2xl bg-black/50 px-4 py-3 backdrop-blur">
                 <div className="text-[12px] uppercase tracking-wider text-white/70">
                   Repeticiones
@@ -626,6 +728,50 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
                   <span className="text-white/60"> / {targetReps}</span>
                 </div>
               </div>
+
+              {/* F-13 — live angle indicator overlay (top-right). Frosted */}
+              {/* white panel so it reads against camera background regardless */}
+              {/* of skin tone or lighting. */}
+              <div
+                data-testid="live-angle"
+                className="rounded-2xl bg-white/70 px-4 py-3 text-gray-900 backdrop-blur shadow-lg"
+              >
+                <div className="text-[11px] uppercase tracking-wider text-gray-500">
+                  Ángulo actual
+                </div>
+                <div className="mt-0.5 flex items-baseline gap-1.5">
+                  <span
+                    data-testid="live-angle-value"
+                    className="text-[26px] font-semibold tabular-nums leading-none"
+                  >
+                    {liveAngle}°
+                  </span>
+                  <span className="text-[11px] font-medium text-gray-500">
+                    {driverJoint}
+                  </span>
+                </div>
+                <div className="relative mt-2 h-1.5 w-36 overflow-hidden rounded-full bg-gray-200">
+                  {/* Positive (flexion) fill — blue, grows rightward from center. */}
+                  <div
+                    className="absolute left-1/2 top-0 h-full rounded-r-full bg-[#007AFF] transition-[width] duration-150"
+                    style={{ width: `${positiveFillPct / 2}%` }}
+                  />
+                  {/* Negative (hyperextension) sliver — red, grows leftward from center. */}
+                  <div
+                    className="absolute right-1/2 top-0 h-full rounded-l-full bg-[#FF3B30] transition-[width] duration-150"
+                    style={{ width: `${negativeFillPct / 2}%` }}
+                  />
+                  {/* Center tick. */}
+                  <div className="absolute left-1/2 top-0 h-full w-px -translate-x-px bg-gray-400/60" />
+                </div>
+                <div className="mt-2 text-[11px] text-gray-500">
+                  Pico de esta repetición:{' '}
+                  <span className="font-semibold text-gray-700 tabular-nums">
+                    {livePeak}°
+                  </span>
+                </div>
+              </div>
+
               <button
                 type="button"
                 onClick={handleEnd}
@@ -636,23 +782,38 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
             </div>
           </div>
 
-          {/* Live angle pill */}
-          <div className="flex flex-1 items-end justify-center pb-10">
-            <div className="rounded-2xl bg-black/50 px-5 py-3 backdrop-blur">
-              <div className="text-[11px] uppercase tracking-wider text-white/70">
-                {driverJoint}
-              </div>
-              <div className="mt-0.5 text-[22px] font-semibold leading-none">
-                {Math.abs(liveMcp)}°
-              </div>
-              <div className="mt-3 h-1.5 w-44 overflow-hidden rounded-full bg-white/15">
-                <div
-                  className="h-full rounded-full bg-[#34C759] transition-[width] duration-100"
-                  style={{ width: `${arcPct}%` }}
-                />
-              </div>
+          {/* F-13 — per-joint mini bars. Compact vertical strip on the right */}
+          {/* edge of the video, one bar per tracked joint. No numbers — just */}
+          {/* shape. Only rendered when tracked_joints.length > 1. */}
+          {showJointStrip ? (
+            <div
+              data-testid="joint-strip"
+              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 flex flex-col gap-2 rounded-2xl bg-white/70 px-2 py-3 shadow-lg backdrop-blur"
+            >
+              {trackedJoints.map((joint) => {
+                const max = JOINT_CALIBRATION[joint as JointName].clinicalMax;
+                const value = livePerJoint[joint] ?? 0;
+                const pct = Math.max(0, Math.min(100, (Math.abs(value) / Math.max(1, max)) * 100));
+                return (
+                  <div
+                    key={joint}
+                    className="flex flex-col items-center gap-1"
+                    data-joint={joint}
+                  >
+                    <div className="text-[9px] font-medium uppercase tracking-wider text-gray-500">
+                      {joint}
+                    </div>
+                    <div className="relative h-16 w-2 overflow-hidden rounded-full bg-gray-200">
+                      <div
+                        className="absolute bottom-0 left-0 w-full rounded-full bg-[#007AFF] transition-[height] duration-150"
+                        style={{ height: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          </div>
+          ) : null}
         </div>
       </main>
     );
