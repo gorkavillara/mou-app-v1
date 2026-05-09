@@ -6,16 +6,9 @@ mou-board-version: 1
 ## 📥 Backlog
 
 - [ ] **B-17** [P1] Documento legal para director médico (Gorka) #backend
-- [ ] **B-18** [P2] Webhook Slack/email cuando paciente lleva 48h sin sesión #backend
-- [ ] **B-19** [P2] Export CSV de un paciente #backend
-- [ ] **F-12** [P1] Componente `<ExerciseAnimation>` con mano animada #frontend
 - [ ] **F-15** [P2] Modo oscuro completo en panel doctor #frontend
-- [ ] **F-16** [P2] Indicador "última sesión hace X horas" en lista #frontend
-- [ ] **IA-07** [P1] Producción de 2 animaciones Lottie/GIF de mano #ia
-- [ ] **IA-08** [P1] Indicador en vivo de ángulo durante ejercicio #ia
-- [ ] **IA-09** [P1] Detección de "ejercicio mal hecho" + aviso #ia
+- [ ] **IA-08** [P1] Indicador en vivo de ángulo durante ejercicio (cubierto por F-13) #ia
 - [ ] **IA-10** [P2] Estimación de calidad de movimiento (velocidad, suavidad) #ia
-- [ ] **IA-11** [P2] Detección de mano correcta (handedness) #ia
 - [ ] **IA-12** [P2] Modo "espejo" autovalidación #ia
 - [ ] **OPS-1** [P0] Validación con goniómetro de los `measuredOpen/measuredClosed` (Javi) #infra
 - [ ] **OPS-2** [P1] Deploy a Vercel preview el 2026-05-14 + QA en iPhone real #infra
@@ -33,6 +26,14 @@ _(vacío)_
 
 ## ✅ Hecho
 
+- [x] **B-18** [P2] `GET /api/doctor/alerts` (función `stale_patients`, threshold configurable) ✓ 2026-05-09 #backend
+- [x] **B-19** [P2] `GET /api/doctor/patients/:id/export.csv` (RFC 4180, BOM UTF-8, cap 50k filas) ✓ 2026-05-09 #backend
+- [x] **F-prog** Gráfico Recharts de progresión angular en detalle de paciente ✓ 2026-05-09 #frontend
+- [x] **F-adh-7d** Adherencia 7d junto a Total (cards en detalle, caption en lista) ✓ 2026-05-09 #frontend
+- [x] **F-16** [P2] "Última sesión hace X" en cada fila + LastSessionBadge ✓ 2026-05-09 #frontend
+- [x] **F-12 / IA-07** Animaciones SVG (`FlexionPasivaDedos`, `ExtensionActivaDedos`, `GenericHand`) en cards e intro ✓ 2026-05-09 #ia
+- [x] **IA-09** [P1] Detección de "ejercicio mal hecho": `createRepCoaching`/`updateRepCoaching` + toast en sesión ✓ 2026-05-09 #ia
+- [x] **IA-11** [P2] Sampling de handedness MediaPipe + aviso one-shot si la mano no coincide ✓ 2026-05-09 #ia
 - [x] **B-13** [P1] Adherencia 7d/total: `patient_adherence_window(N)` + view `patient_adherence_breakdown` ✓ 2026-05-09 #backend
 - [x] **B-14** [P1] `GET /api/doctor/patients/:id/progression` (function `patient_progression`, filtra low_*) ✓ 2026-05-09 #backend
 - [x] **B-16** [P1] `audit_log` + triggers en patients (insert + discharge) y prescriptions (insert) ✓ 2026-05-09 #backend
