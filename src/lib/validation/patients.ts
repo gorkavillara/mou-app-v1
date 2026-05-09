@@ -90,3 +90,30 @@ export const createSessionSchema = z
   .strict();
 
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
+
+/**
+ * Query schema for GET /api/doctor/patients/:id/progression (B-14).
+ *
+ * - `from` / `to`: optional ISO date (YYYY-MM-DD); the route fills defaults
+ *   (patient.started_at and current_date) when missing.
+ * - `joint`: optional, can be repeated (URLSearchParams.getAll). Each value
+ *   must be a known joint label per the angular convention vault doc.
+ */
+const isoDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, { error: 'must be YYYY-MM-DD' });
+
+export const progressionQuerySchema = z
+  .object({
+    from: isoDate.optional(),
+    to: isoDate.optional(),
+    // Up to 32 joints — well above the 13 we currently track (wrist + 4 per
+    // finger × 3 joints = 12). Bound prevents pathological URLs.
+    joint: z.array(z.string().min(1).max(24)).max(32).optional(),
+  })
+  .refine(
+    (q) => !q.from || !q.to || q.from <= q.to,
+    { error: 'from must be <= to', path: ['from'] },
+  );
+
+export type ProgressionQuery = z.infer<typeof progressionQuerySchema>;

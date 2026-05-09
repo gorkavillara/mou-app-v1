@@ -192,14 +192,17 @@ describe('GET /api/doctor/patients (B-07)', () => {
         };
       },
     ];
-    handlers['patient_adherence:select'] = [
+    handlers['patient_adherence_breakdown:select'] = [
       () => ({
         data: [
           {
             patient_id: 'p1',
-            completed_sessions: 3,
-            expected_sessions: 10,
-            adherence_pct: 30,
+            total_completed: 3,
+            total_target: 10,
+            total_pct: 30,
+            week_completed: 2,
+            week_target: 4,
+            week_pct: 50,
           },
         ],
         error: null,
@@ -216,11 +219,14 @@ describe('GET /api/doctor/patients (B-07)', () => {
     expect(Array.isArray(body.patients)).toBe(true);
     expect(body.patients[0].adherence_pct).toBe(30);
     expect(body.patients[0].completed_sessions).toBe(3);
+    expect(body.patients[0].adherence.total.pct).toBe(30);
+    expect(body.patients[0].adherence.week.pct).toBe(50);
+    expect(body.patients[0].adherence.week.completed).toBe(2);
   });
 
   it('returns array without search', async () => {
     handlers['patients:select'] = [() => ({ data: [], error: null })];
-    handlers['patient_adherence:select'] = [() => ({ data: [], error: null })];
+    handlers['patient_adherence_breakdown:select'] = [() => ({ data: [], error: null })];
 
     const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'GET');
     const res = await listPatients(req);

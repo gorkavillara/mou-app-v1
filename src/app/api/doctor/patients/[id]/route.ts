@@ -58,9 +58,12 @@ export async function GET(
       .eq('patient_id', id)
       .order('started_at', { ascending: false })
       .limit(20),
+    // B-13: pull total + 7d adherence breakdown.
     supabase
-      .from('patient_adherence')
-      .select('completed_sessions, expected_sessions, adherence_pct')
+      .from('patient_adherence_breakdown')
+      .select(
+        'total_completed, total_target, total_pct, week_completed, week_target, week_pct',
+      )
       .eq('patient_id', id)
       .maybeSingle(),
   ]);
@@ -72,10 +75,42 @@ export async function GET(
   if (adherenceRes.error)
     return errorResponse('db_error', 500, adherenceRes.error.message);
 
+  const ad = adherenceRes.data as
+    | {
+        total_completed: number | null;
+        total_target: number | null;
+        total_pct: number | null;
+        week_completed: number | null;
+        week_target: number | null;
+        week_pct: number | null;
+      }
+    | null;
+
+  // Backwards-compatible `adherence` shape preserved (existing UI reads
+  // {completed_sessions, expected_sessions, adherence_pct}); we add the
+  // structured breakdown alongside.
+  const adherence = ad
+    ? {
+        completed_sessions: ad.total_completed ?? 0,
+        expected_sessions: ad.total_target ?? 0,
+        adherence_pct: ad.total_pct,
+        total: {
+          completed: ad.total_completed ?? 0,
+          target: ad.total_target ?? 0,
+          pct: ad.total_pct,
+        },
+        week: {
+          completed: ad.week_completed ?? 0,
+          target: ad.week_target ?? 0,
+          pct: ad.week_pct,
+        },
+      }
+    : null;
+
   return NextResponse.json({
     patient,
     prescriptions: prescriptionsRes.data ?? [],
     sessions: sessionsRes.data ?? [],
-    adherence: adherenceRes.data ?? null,
+    adherence,
   });
 }

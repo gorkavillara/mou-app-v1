@@ -150,6 +150,48 @@ export interface Database {
           adherence_pct: number;
         };
       };
+      // B-13: total + 7d adherence breakdown.
+      patient_adherence_breakdown: {
+        Row: {
+          patient_id: string;
+          doctor_id: string;
+          total_completed: number;
+          total_target: number;
+          total_pct: number;
+          week_completed: number | null;
+          week_target: number | null;
+          week_pct: number | null;
+        };
+      };
+    };
+
+    Functions: {
+      // B-13
+      patient_adherence_window: {
+        Args: { window_days: number };
+        Returns: {
+          patient_id: string;
+          sessions_completed: number;
+          sessions_target: number;
+          adherence_pct: number;
+        }[];
+      };
+      // B-14
+      patient_progression: {
+        Args: {
+          p_patient_id: string;
+          p_from: string;
+          p_to: string;
+          p_joints: string[] | null;
+        };
+        Returns: {
+          day: string;
+          joint: string;
+          max_flexion: number | null;
+          max_extension: number | null;
+          samples: number;
+        }[];
+      };
     };
   };
 }

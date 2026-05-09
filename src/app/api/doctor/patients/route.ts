@@ -116,12 +116,15 @@ export async function GET(request: NextRequest) {
     .order('discharged_at', { ascending: true, nullsFirst: true })
     .order('started_at', { ascending: false });
 
+  // B-13: read the breakdown view (total + 7d window) instead of just the
+  // total. The view is doctor-scoped through patient_adherence which already
+  // exposes doctor_id; RLS on the underlying tables filters rows.
   const [patientsRes, adherenceRes] = await Promise.all([
     q,
     supabase
-      .from('patient_adherence')
+      .from('patient_adherence_breakdown')
       .select(
-        'patient_id, completed_sessions, expected_sessions, adherence_pct',
+        'patient_id, total_completed, total_target, total_pct, week_completed, week_target, week_pct',
       ),
   ]);
 
@@ -132,16 +135,18 @@ export async function GET(request: NextRequest) {
     return errorResponse('db_error', 500, adherenceRes.error.message);
   }
 
-  const adherenceByPatient = new Map<
-    string,
-    { completed_sessions: number; expected_sessions: number; adherence_pct: number }
-  >();
-  for (const a of adherenceRes.data ?? []) {
-    adherenceByPatient.set(a.patient_id, {
-      completed_sessions: a.completed_sessions,
-      expected_sessions: a.expected_sessions,
-      adherence_pct: a.adherence_pct,
-    });
+  type BreakdownRow = {
+    patient_id: string;
+    total_completed: number | null;
+    total_target: number | null;
+    total_pct: number | null;
+    week_completed: number | null;
+    week_target: number | null;
+    week_pct: number | null;
+  };
+  const adherenceByPatient = new Map<string, BreakdownRow>();
+  for (const a of (adherenceRes.data ?? []) as BreakdownRow[]) {
+    adherenceByPatient.set(a.patient_id, a);
   }
 
   const patients = (patientsRes.data ?? []).map((p) => {
@@ -152,9 +157,23 @@ export async function GET(request: NextRequest) {
       pathology_code: p.pathology_code,
       started_at: p.started_at,
       discharged_at: p.discharged_at,
-      adherence_pct: ad?.adherence_pct ?? null,
-      completed_sessions: ad?.completed_sessions ?? 0,
-      expected_sessions: ad?.expected_sessions ?? 0,
+      // Backwards-compatible top-level fields (UI today reads these).
+      adherence_pct: ad?.total_pct ?? null,
+      completed_sessions: ad?.total_completed ?? 0,
+      expected_sessions: ad?.total_target ?? 0,
+      // New: structured breakdown for the next frontend round.
+      adherence: {
+        total: {
+          completed: ad?.total_completed ?? 0,
+          target: ad?.total_target ?? 0,
+          pct: ad?.total_pct ?? null,
+        },
+        week: {
+          completed: ad?.week_completed ?? 0,
+          target: ad?.week_target ?? 0,
+          pct: ad?.week_pct ?? null,
+        },
+      },
     };
   });
 
