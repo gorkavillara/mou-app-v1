@@ -316,6 +316,271 @@ export function updateRepCounter(counter: RepCounter, angle: number): RepCounter
   return next;
 }
 
+// --- Frame quality + rep counter (IA-05, IA-06) ---
+//
+// The legacy `createRepCounter` / `updateRepCounter` API above operates on a
+// single bipolar "finger angle" (positive flexion / negative extension) in raw
+// degrees. Fase 1 moves to per-joint normalized degrees: 0° = straight, 90°
+// (or 100°/80° depending on the joint) = full flexion, with optional negative
+// values for hyperextension on wrist/MCP. Threshold ±15° on the legacy scale
+// is meaningless on the new scale because raw and normalized degrees are not
+// the same units.
+//
+// The new API below (`createJointRepCounter` / `updateJointRepCounter`) takes
+// clinical degrees directly, uses two thresholds (enter / exit) for hysteresis
+// and tracks per-joint peaks so we can store flexor data per rep.
+
+/**
+ * Quality signal for a single frame in the rep window.
+ *
+ * `detected` is the only mandatory field — everything else is optional because
+ * MediaPipe sometimes omits handedness or per-landmark visibility scores.
+ */
+export type FrameQuality = {
+  /** Any hand at all detected this frame. */
+  detected: boolean;
+  /** MediaPipe handedness label, when present. */
+  handedness?: 'Left' | 'Right';
+  /** Confidence of the handedness label, 0..1. */
+  handednessScore?: number;
+  /** Average of `landmark.visibility` across the 21 keypoints, 0..1. */
+  visibilityScore?: number;
+};
+
+/** Rep-level quality classification; matches the DB enum on `rep_measurements`. */
+export type RepQualityFlag = 'clean' | 'low_visibility' | 'low_confidence' | 'partial';
+
+export type RepQualityBreakdown = {
+  flag: RepQualityFlag;
+  framesMissing: number;
+  framesTotal: number;
+};
+
+// Heuristic constants. Centralised for visibility — tune these against real
+// pilot recordings, not synthetic tests.
+//
+// VISIBILITY_FLOOR: per-frame threshold below which we treat the frame as
+//   missing. MediaPipe's visibility is not always populated; when absent we
+//   treat the frame as visible (we trust `detected`) so calibrations don't
+//   drift on devices that don't report it.
+// LOW_VIS_RATIO / PARTIAL_VIS_RATIO: rep-level missing-frame ratios. Anything
+//   above PARTIAL is "the camera basically lost the hand" → unusable for ROM.
+//   Between LOW_VIS and PARTIAL we keep the rep but the doctor should know not
+//   to trust the peaks.
+// LOW_CONFIDENCE_HANDEDNESS: average handedness score under which we flag the
+//   rep — even with perfect visibility, MediaPipe occasionally swaps left/
+//   right and that's a strong "untrustworthy" signal for ROM.
+const VISIBILITY_FLOOR = 0.4;
+const LOW_VIS_RATIO = 0.3;
+const PARTIAL_VIS_RATIO = 0.5;
+const LOW_CONFIDENCE_HANDEDNESS = 0.7;
+
+/**
+ * Classifies the per-frame quality history of a single rep into one of four
+ * flags. Order matters: we report the worst applicable flag.
+ *
+ * Severity ladder (worst → best):
+ *   partial         — camera basically lost the hand (>50% missing)
+ *   low_visibility  — significant frames missing or out-of-floor (>30% missing)
+ *   low_confidence  — handedness confidence too low on average
+ *   clean           — none of the above
+ */
+export function classifyRepQuality(
+  perFrameQuality: FrameQuality[],
+): RepQualityBreakdown {
+  const framesTotal = perFrameQuality.length;
+  if (framesTotal === 0) {
+    return { flag: 'partial', framesMissing: 0, framesTotal: 0 };
+  }
+
+  let framesMissing = 0;
+  let confidenceSum = 0;
+  let confidenceCount = 0;
+
+  for (const f of perFrameQuality) {
+    const visUnder =
+      typeof f.visibilityScore === 'number' && f.visibilityScore < VISIBILITY_FLOOR;
+    if (!f.detected || visUnder) {
+      framesMissing += 1;
+    }
+    if (typeof f.handednessScore === 'number') {
+      confidenceSum += f.handednessScore;
+      confidenceCount += 1;
+    }
+  }
+
+  const missingRatio = framesMissing / framesTotal;
+  const avgConfidence = confidenceCount > 0 ? confidenceSum / confidenceCount : 1;
+
+  let flag: RepQualityFlag;
+  if (missingRatio > PARTIAL_VIS_RATIO) {
+    flag = 'partial';
+  } else if (missingRatio > LOW_VIS_RATIO) {
+    flag = 'low_visibility';
+  } else if (avgConfidence < LOW_CONFIDENCE_HANDEDNESS) {
+    flag = 'low_confidence';
+  } else {
+    flag = 'clean';
+  }
+
+  return { flag, framesMissing, framesTotal };
+}
+
+// Default thresholds in clinical degrees (post-normalization). Crossing
+// FLEXION_ENTER_DEG top-down opens a rep; crossing FLEXION_EXIT_DEG
+// bottom-up closes it. The gap between them is the hysteresis band that
+// prevents a finger oscillating around one threshold from double-counting.
+const FLEXION_ENTER_DEG = 35;
+const FLEXION_EXIT_DEG = 10;
+// Eight frames at ~30 fps ≈ 270 ms — long enough to absorb single-frame
+// MediaPipe glitches and short enough that it doesn't lag the live HUD.
+const SMOOTHING_WINDOW = 8;
+
+export type JointPeakMap = Partial<Record<JointName, { peakFlex: number; peakExt: number }>>;
+
+export type JointRepCounterOptions = {
+  flexionEnter?: number;
+  flexionExit?: number;
+  smoothingWindow?: number;
+};
+
+/**
+ * Per-rep state captured every time `updateJointRepCounter` closes a rep.
+ *
+ * `peaks` carries the maximum flexion/extension reached on every joint that
+ * was passed to `updateJointRepCounter` during the rep — so even when MCP
+ * drives the counter, PIP/DIP peaks land in the rep payload.
+ */
+export type CompletedJointRep = {
+  repNumber: number;
+  peaks: JointPeakMap;
+  framesMissing: number;
+  framesTotal: number;
+  quality: RepQualityBreakdown;
+};
+
+export type JointRepCounter = {
+  flexionEnter: number;
+  flexionExit: number;
+  smoothingWindow: number;
+  angleHistory: number[];
+  /** 'open' = below exit threshold, 'flexed' = above enter threshold. */
+  phase: 'open' | 'flexed' | null;
+  repCount: number;
+  /** Joint peaks accumulated for the rep currently in flight. */
+  currentPeaks: JointPeakMap;
+  /** Per-frame quality samples accumulated for the rep currently in flight. */
+  currentFrameQuality: FrameQuality[];
+  /** Set on the tick where a rep just closed; consumers can react and ignore on subsequent ticks. */
+  completedRep?: CompletedJointRep;
+};
+
+export function createJointRepCounter(opts: JointRepCounterOptions = {}): JointRepCounter {
+  return {
+    flexionEnter: opts.flexionEnter ?? FLEXION_ENTER_DEG,
+    flexionExit: opts.flexionExit ?? FLEXION_EXIT_DEG,
+    smoothingWindow: opts.smoothingWindow ?? SMOOTHING_WINDOW,
+    angleHistory: [],
+    phase: null,
+    repCount: 0,
+    currentPeaks: {},
+    currentFrameQuality: [],
+    completedRep: undefined,
+  };
+}
+
+/**
+ * Advances the rep counter by one frame.
+ *
+ * @param counter             Previous counter state (treated as immutable; the function returns a new object).
+ * @param normalizedAngleDeg  Driver angle in clinical degrees (post-normalization).
+ *                            Positive = flexion, negative = extension. Pass `NaN`/`null`-equivalent
+ *                            via the `frameQuality.detected = false` channel; this function expects a number.
+ * @param jointAnglesByName   Optional map of every joint's normalized angle this frame, used to
+ *                            update per-joint peaks. Keys must be JointName (`MCP` | `PIP` | `DIP` | `wrist`).
+ * @param frameQuality        Optional per-frame quality signal. When omitted we synthesise a
+ *                            "clean detected frame" from the fact that we got an angle at all.
+ *
+ * Hysteresis: a rep opens when the smoothed driver crosses `flexionEnter` from below, and closes
+ * when it crosses `flexionExit` from above. Tiny oscillations around either threshold cannot
+ * complete a rep on their own — both thresholds must be crossed in order.
+ */
+export function updateJointRepCounter(
+  counter: JointRepCounter,
+  normalizedAngleDeg: number,
+  jointAnglesByName?: Partial<Record<JointName, number>>,
+  frameQuality?: FrameQuality,
+): JointRepCounter {
+  const next: JointRepCounter = {
+    ...counter,
+    angleHistory: [...counter.angleHistory, normalizedAngleDeg],
+    currentPeaks: { ...counter.currentPeaks },
+    currentFrameQuality: [...counter.currentFrameQuality],
+    completedRep: undefined,
+  };
+
+  if (next.angleHistory.length > next.smoothingWindow) {
+    next.angleHistory = next.angleHistory.slice(-next.smoothingWindow);
+  }
+
+  // Record per-frame quality. A consumer that didn't give us anything is
+  // treated as "detected, no extra info".
+  next.currentFrameQuality.push(
+    frameQuality ?? { detected: !Number.isNaN(normalizedAngleDeg) },
+  );
+
+  // Update per-joint peaks for the rep currently in flight. Positive values
+  // contribute to peakFlex; negatives to peakExt.
+  if (jointAnglesByName) {
+    for (const [k, vRaw] of Object.entries(jointAnglesByName)) {
+      if (typeof vRaw !== 'number' || Number.isNaN(vRaw)) continue;
+      const joint = k as JointName;
+      const slot = next.currentPeaks[joint] ?? { peakFlex: 0, peakExt: 0 };
+      if (vRaw > 0) {
+        slot.peakFlex = Math.max(slot.peakFlex, Math.round(vRaw));
+      } else if (vRaw < 0) {
+        slot.peakExt = Math.max(slot.peakExt, Math.round(Math.abs(vRaw)));
+      }
+      next.currentPeaks[joint] = slot;
+    }
+  }
+
+  // We need the smoothing buffer half-full before trusting the average; this
+  // mirrors the legacy counter and prevents a single huge first frame from
+  // flipping the state machine immediately.
+  const minSamples = Math.max(2, Math.floor(next.smoothingWindow / 2));
+  if (next.angleHistory.length < minSamples) {
+    return next;
+  }
+
+  const smoothed =
+    next.angleHistory.reduce((a, b) => a + b, 0) / next.angleHistory.length;
+
+  // State machine.
+  if (smoothed >= next.flexionEnter) {
+    next.phase = 'flexed';
+  } else if (smoothed <= next.flexionExit) {
+    if (counter.phase === 'flexed') {
+      // Rep just closed: snapshot peaks + quality, increment, reset accumulators.
+      next.repCount = counter.repCount + 1;
+      const quality = classifyRepQuality(next.currentFrameQuality);
+      next.completedRep = {
+        repNumber: next.repCount,
+        peaks: next.currentPeaks,
+        framesMissing: quality.framesMissing,
+        framesTotal: quality.framesTotal,
+        quality,
+      };
+      next.currentPeaks = {};
+      next.currentFrameQuality = [];
+    }
+    next.phase = 'open';
+  }
+  // else: in the dead band between exit and enter — no transition.
+
+  return next;
+}
+
 // --- Per-joint angle calculation (Fase 1, IA-02) ---
 // See docs/obsidian-vault/12-Convencion-angular.md for the geometric convention.
 
