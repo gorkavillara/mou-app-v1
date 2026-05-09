@@ -47,3 +47,46 @@ export const createPrescriptionSchema = z
   .strict();
 
 export type CreatePrescriptionInput = z.infer<typeof createPrescriptionSchema>;
+
+/**
+ * Path param schema for patient-facing routes (B-11, B-12).
+ *
+ * `access_token` defaults to base64(gen_random_bytes(24)) which is 32 chars,
+ * but we accept 20..64 to give headroom for legacy/future tokens. Anything
+ * outside that range we treat as `not_found` to avoid leaking format details.
+ */
+export const patientTokenSchema = z.string().min(20).max(64);
+
+/**
+ * Body schema for POST /api/patient/:token/sessions (B-12).
+ *
+ * `.strict()` rejects any unknown field — defense in depth against PII slipping
+ * in from a malicious client (D3 anonymity).
+ */
+export const createSessionSchema = z
+  .object({
+    prescription_id: z.uuid(),
+    started_at: z.iso.datetime(),
+    ended_at: z.iso.datetime(),
+    reps_completed: z.number().int().min(0),
+    target_reps: z.number().int().positive(),
+    rep_measurements: z
+      .array(
+        z
+          .object({
+            rep_index: z.number().int().nonnegative(),
+            joint: z.string().min(1).max(16),
+            max_flexion_deg: z.number().nullable().optional(),
+            max_extension_deg: z.number().nullable().optional(),
+            quality_flag: z
+              .enum(['clean', 'low_visibility', 'low_confidence', 'partial'])
+              .optional(),
+          })
+          .strict(),
+      )
+      .max(2000),
+    client_metadata: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+
+export type CreateSessionInput = z.infer<typeof createSessionSchema>;
