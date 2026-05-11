@@ -38,7 +38,9 @@ export const createPrescriptionSchema = z
     sets: z.number().int().positive(),
     reps_per_set: z.number().int().positive(),
     sessions_per_day: z.number().int().positive(),
-    duration_days: z.number().int().positive(),
+    // duration_days is optional: NULL/omitted = open-ended treatment that
+    // only ends when the doctor calls /discharge (manual-testing 2026-05-11).
+    duration_days: z.number().int().positive().optional(),
     starts_on: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/, { error: 'starts_on must be YYYY-MM-DD' })

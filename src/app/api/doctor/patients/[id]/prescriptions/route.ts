@@ -65,7 +65,8 @@ export async function POST(
       sets: body.sets,
       reps_per_set: body.reps_per_set,
       sessions_per_day: body.sessions_per_day,
-      duration_days: body.duration_days,
+      // Optional in the schema — null means open-ended treatment.
+      duration_days: body.duration_days ?? null,
       starts_on: body.starts_on ?? today,
     })
     .select(

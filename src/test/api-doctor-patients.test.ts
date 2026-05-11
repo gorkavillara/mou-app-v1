@@ -284,6 +284,54 @@ describe('POST /api/doctor/patients/:id/prescriptions (B-09)', () => {
     });
     expect(res.status).toBe(404);
   });
+
+  it('201 when duration_days is omitted from the body (open-ended treatment)', async () => {
+    // Bugfix manual-testing 2026-05-11: doctor can prescribe without
+    // duration; treatment ends only on /discharge. The insert must persist
+    // duration_days as NULL.
+    handlers['patients:select'] = [() => ({ data: { id: 'p1' }, error: null })];
+    handlers['exercises:select'] = [() => ({ data: { id: VALID_UUID }, error: null })];
+    handlers['prescriptions:insert'] = [
+      ({ args }) => {
+        // The first arg to .insert is the row payload.
+        const row = (args[0] ?? {}) as { duration_days?: number | null };
+        expect(row.duration_days).toBeNull();
+        return {
+          data: {
+            id: 'rx1',
+            patient_id: 'p1',
+            exercise_id: VALID_UUID,
+            sets: 3,
+            reps_per_set: 20,
+            sessions_per_day: 4,
+            duration_days: null,
+            starts_on: '2026-05-11',
+            replaces_id: null,
+            created_at: '2026-05-11T10:00:00Z',
+          },
+          error: null,
+        };
+      },
+    ];
+
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1/prescriptions',
+      'POST',
+      {
+        exercise_id: VALID_UUID,
+        sets: 3,
+        reps_per_set: 20,
+        sessions_per_day: 4,
+        // duration_days intentionally omitted
+      },
+    );
+    const res = await createPrescription(req, {
+      params: Promise.resolve({ id: 'p1' }),
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.prescription.duration_days).toBeNull();
+  });
 });
 
 describe('POST /api/doctor/patients/:id/discharge (B-10)', () => {

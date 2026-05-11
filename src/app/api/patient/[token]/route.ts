@@ -17,7 +17,8 @@ import { errorResponse } from '@/lib/api/errors';
  *   - 500: db error
  *
  * "Active prescription" = patient is not discharged AND
- *   starts_on <= today < starts_on + duration_days.
+ *   starts_on <= today AND (duration_days IS NULL OR today < starts_on + duration_days).
+ * NULL duration_days = open-ended treatment, ends only on doctor /discharge.
  *
  * Forced dynamic: this reads time-sensitive data (today's session count, active
  * prescription window) — Next.js must NOT cache it.
@@ -40,7 +41,7 @@ type PrescriptionRow = {
   sets: number;
   reps_per_set: number;
   sessions_per_day: number;
-  duration_days: number;
+  duration_days: number | null;
   starts_on: string;
   exercise: ExerciseRow | ExerciseRow[] | null;
 };
@@ -108,7 +109,9 @@ export async function GET(
 
   const prescriptions = ((rawPrescriptions ?? []) as PrescriptionRow[])
     .filter((p) => {
-      // Active if today < starts_on + duration_days.
+      // Open-ended (duration_days NULL) → always active. Otherwise check
+      // today < starts_on + duration_days.
+      if (p.duration_days === null) return true;
       const endsOn = addDaysISO(p.starts_on, p.duration_days);
       return today < endsOn;
     })
@@ -124,7 +127,8 @@ export async function GET(
         sessions_per_day: p.sessions_per_day,
         duration_days: p.duration_days,
         starts_on: p.starts_on,
-        ends_on: addDaysISO(p.starts_on, p.duration_days),
+        // ends_on is null for open-ended prescriptions.
+        ends_on: p.duration_days === null ? null : addDaysISO(p.starts_on, p.duration_days),
         exercise,
       };
     });

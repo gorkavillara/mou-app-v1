@@ -85,7 +85,7 @@ describe('GET /api/doctor/alerts (B-18)', () => {
     );
   });
 
-  it('200 with 2 stale patients sorted desc by hours_since_last', async () => {
+  it('200 with 3 stale patients sorted desc by hours_since_last (includes open-ended)', async () => {
     rpcResponses['stale_patients'] = [
       {
         data: [
@@ -106,6 +106,17 @@ describe('GET /api/doctor/alerts (B-18)', () => {
             hours_since_last: 500000,
             has_ever_session: false,
           },
+          // Bugfix 2026-05-11: this patient's only prescription has
+          // duration_days = NULL (open-ended). The stale_patients SQL
+          // function must treat it as active and surface it here.
+          {
+            patient_id: 'p-open-ended',
+            external_id: 'HC-003',
+            pathology_code: 'flexor',
+            last_session_at: '2026-05-05T10:00:00Z',
+            hours_since_last: 140,
+            has_ever_session: true,
+          },
         ],
         error: null,
       },
@@ -119,11 +130,13 @@ describe('GET /api/doctor/alerts (B-18)', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.threshold_hours).toBe(48);
-    expect(body.patients).toHaveLength(2);
+    expect(body.patients).toHaveLength(3);
     expect(body.patients[0].patient_id).toBe('p-never');
     expect(body.patients[0].has_ever_session).toBe(false);
-    expect(body.patients[1].patient_id).toBe('p-recent');
-    expect(body.patients[1].hours_since_last).toBe(60);
+    expect(body.patients[1].patient_id).toBe('p-open-ended');
+    expect(body.patients[1].hours_since_last).toBe(140);
+    expect(body.patients[2].patient_id).toBe('p-recent');
+    expect(body.patients[2].hours_since_last).toBe(60);
   });
 
   it('400 when threshold_hours is out of range', async () => {

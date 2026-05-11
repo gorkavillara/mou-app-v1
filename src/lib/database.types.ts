@@ -82,7 +82,8 @@ export interface Database {
           sets: number;
           reps_per_set: number;
           sessions_per_day: number;
-          duration_days: number;
+          // NULL = tratamiento abierto (acaba sólo con discharge).
+          duration_days: number | null;
           starts_on: string;
           replaces_id: string | null;
           created_at: string;

@@ -216,6 +216,66 @@ describe('GET /api/patient/[token] (B-11)', () => {
     expect(body.error).toBe('tratamiento_finalizado');
   });
 
+  it('open-ended prescription (duration_days = null) is returned as active forever as long as the patient is not discharged', async () => {
+    // Bugfix manual-testing 2026-05-11: a prescription with NULL
+    // duration_days must NOT be filtered out, regardless of how long ago
+    // starts_on is. Treatment ends only when the doctor discharges.
+    handlers['patients:select'] = [
+      () => ({
+        data: {
+          id: 'p1',
+          external_id: 'HC-001',
+          pathology_code: 'flexor',
+          started_at: '2026-01-01',
+          discharged_at: null,
+        },
+        error: null,
+      }),
+    ];
+    handlers['prescriptions:select'] = [
+      () => ({
+        data: [
+          {
+            id: 'rx-open',
+            exercise_id: 'ex1',
+            sets: 3,
+            reps_per_set: 20,
+            sessions_per_day: 4,
+            duration_days: null, // open-ended
+            starts_on: '2026-01-01', // way in the past — should still be active
+            exercise: {
+              id: 'ex1',
+              code: 'flexion-pasiva-dedos',
+              name: 'Flexión pasiva',
+              description: null,
+              animation_url: null,
+              tracked_joints: ['MCP'],
+              target_finger: 'all',
+            },
+          },
+        ],
+        error: null,
+      }),
+    ];
+    handlers['sessions:select'] = [
+      () => ({ data: null, error: null, count: 0 }),
+    ];
+
+    const req = jsonRequest(
+      `http://localhost:3500/api/patient/${VALID_TOKEN}`,
+      'GET',
+    );
+    const res = await getPatient(req, {
+      params: Promise.resolve({ token: VALID_TOKEN }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.prescriptions).toHaveLength(1);
+    expect(body.prescriptions[0].duration_days).toBeNull();
+    // Open-ended prescriptions have no closing date.
+    expect(body.prescriptions[0].ends_on).toBeNull();
+  });
+
   it('410 when all prescriptions have expired', async () => {
     handlers['patients:select'] = [
       () => ({
