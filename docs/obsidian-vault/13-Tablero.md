@@ -26,6 +26,9 @@ _(vacío)_
 
 ## ✅ Hecho
 
+- [x] **FIX-1** Modal centrado: regla `dialog[open] { margin: auto }` global (Tailwind 4 preflight) + `m-auto` por dialog ✓ 2026-05-11 #frontend
+- [x] **FIX-2** `button { cursor: pointer }` globales en `@layer base` (Tailwind 4 los quitó por defecto) ✓ 2026-05-11 #frontend
+- [x] **FIX-3** `duration_days` opcional: migración + Zod + `B-11/B-13/B-18` open-ended + UI con pill "Sin fecha de fin" ✓ 2026-05-11 #backend #frontend
 - [x] **B-18** [P2] `GET /api/doctor/alerts` (función `stale_patients`, threshold configurable) ✓ 2026-05-09 #backend
 - [x] **B-19** [P2] `GET /api/doctor/patients/:id/export.csv` (RFC 4180, BOM UTF-8, cap 50k filas) ✓ 2026-05-09 #backend
 - [x] **F-prog** Gráfico Recharts de progresión angular en detalle de paciente ✓ 2026-05-09 #frontend
