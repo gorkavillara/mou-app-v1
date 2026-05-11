@@ -55,7 +55,7 @@ Una por paciente activa. Si el doctor cambia la pauta, se crea una nueva con `re
 | `sets` | int | ej. 3 |
 | `reps_per_set` | int | ej. 20 |
 | `sessions_per_day` | int | ej. 8 (cada 3h ≈ 8/día) |
-| `duration_days` | int | ej. 14 |
+| `duration_days` | int NULL | ej. 14. NULL = tratamiento abierto (acaba sólo cuando el doctor pulsa "Finalizar rehabilitación"). |
 | `starts_on` | date | |
 | `replaces_id` | uuid NULL FK→prescriptions | |
 | `created_at` | timestamptz | |
