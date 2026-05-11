@@ -31,6 +31,18 @@ test.describe('Doctor patient list', () => {
       const dialog = new NewPatientDialogPO(page);
       await list.newPatientButton.click();
       await expect(dialog.dialog).toBeVisible();
+
+      // FIX-1: centered dialog (Tailwind 4 preflight wipes `margin: auto`).
+      const viewport = page.viewportSize();
+      if (viewport) {
+        const box = await dialog.dialog.boundingBox();
+        expect(box).not.toBeNull();
+        if (box) {
+          const offset = Math.abs(box.x + box.width / 2 - viewport.width / 2);
+          expect(offset).toBeLessThan(24);
+        }
+      }
+
       await list.snap(testInfo, 'new-patient-dialog');
 
       await dialog.fillAndSubmit(externalId, 'flexor');

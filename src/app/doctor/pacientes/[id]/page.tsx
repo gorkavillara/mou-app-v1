@@ -246,9 +246,11 @@ function PrescriptionsSection({
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-xs font-medium text-gray-700">
-                    {remaining > 0
-                      ? `${remaining} ${remaining === 1 ? 'día' : 'días'} restantes`
-                      : 'finalizada'}
+                    {remaining === null
+                      ? 'abierto'
+                      : remaining > 0
+                        ? `${remaining} ${remaining === 1 ? 'día' : 'días'} restantes`
+                        : 'finalizada'}
                   </p>
                   <p className="text-[11px] text-gray-400 mt-0.5">
                     inicio {formatShortDate(rx.starts_on)}
@@ -372,7 +374,10 @@ function SessionsSection({ sessions }: { sessions: SessionRow[] }) {
   );
 }
 
-function daysRemaining(startsOn: string, durationDays: number): number {
+function daysRemaining(startsOn: string, durationDays: number | null): number | null {
+  // null durationDays = open-ended treatment (manual-testing 2026-05-11);
+  // we return null so the UI can render "abierto" instead of a day count.
+  if (durationDays === null) return null;
   try {
     const start = parseISO(startsOn);
     const elapsed = differenceInDays(new Date(), start);

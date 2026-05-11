@@ -48,6 +48,8 @@ export class NewPrescriptionDialogPO {
   readonly repsInput: Locator;
   readonly sessionsPerDayInput: Locator;
   readonly durationDaysInput: Locator;
+  readonly openEndedPill: Locator;
+  readonly withEndDatePill: Locator;
   readonly preview: Locator;
   readonly submitButton: Locator;
 
@@ -58,10 +60,16 @@ export class NewPrescriptionDialogPO {
     this.repsInput = this.dialog.getByLabel('Reps por serie');
     this.sessionsPerDayInput = this.dialog.getByLabel('Sesiones/día');
     this.durationDaysInput = this.dialog.getByLabel('Duración (días)');
+    this.openEndedPill = this.dialog.getByRole('radio', { name: 'Sin fecha de fin' });
+    this.withEndDatePill = this.dialog.getByRole('radio', { name: 'Hasta una fecha' });
     this.preview = this.dialog.locator('div.bg-blue-50');
     this.submitButton = this.dialog.getByRole('button', { name: /Añadir/ });
   }
 
+  /**
+   * Fill and submit. Pass `durationDays` to switch to the
+   * "Hasta una fecha" mode; omit to keep the default open-ended mode.
+   */
   async fillAndSubmit(opts: {
     sets?: number; reps?: number; sessionsPerDay?: number; durationDays?: number;
   } = {}): Promise<void> {
@@ -69,8 +77,10 @@ export class NewPrescriptionDialogPO {
     if (opts.reps !== undefined) await this.repsInput.fill(String(opts.reps));
     if (opts.sessionsPerDay !== undefined)
       await this.sessionsPerDayInput.fill(String(opts.sessionsPerDay));
-    if (opts.durationDays !== undefined)
+    if (opts.durationDays !== undefined) {
+      await this.withEndDatePill.click();
       await this.durationDaysInput.fill(String(opts.durationDays));
+    }
     await this.submitButton.click();
   }
 }

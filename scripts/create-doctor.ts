@@ -51,7 +51,11 @@ async function main() {
   }
 
   if (userId) {
-    console.log(`Auth user already exists: ${userId}`);
+    // Refresh the password so callers can re-run the script with a new password
+    // and trust the auth user is in the expected state.
+    const { error: updateError } = await supabase.auth.admin.updateUserById(userId, { password });
+    if (updateError) throw updateError;
+    console.log(`Auth user already exists: ${userId} (password refreshed)`);
   } else {
     const { data, error } = await supabase.auth.admin.createUser({
       email,

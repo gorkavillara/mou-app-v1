@@ -24,3 +24,31 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/*
+ * FIX-2 (manual testing 2026-05-11): Tailwind 4 removed the implicit
+ * `cursor: pointer` on buttons that v3 Preflight provided. Re-add it
+ * globally so we don't have to sprinkle `cursor-pointer` on every button.
+ * Disabled buttons keep the default cursor. `<a>` with `[href]` already
+ * inherits `cursor: pointer` from the UA stylesheet, so we don't touch it.
+ */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+}
+
+/*
+ * FIX-1 (manual testing 2026-05-11): Tailwind 4 Preflight applies
+ * `*, ::before, ::after, ::backdrop { margin: 0 }`, which wipes the
+ * `margin: auto` the UA stylesheet uses to center `<dialog>` opened with
+ * `showModal()`. Re-establish the default centering for modal dialogs.
+ * Individual dialogs also carry an explicit `m-auto` class as a belt-and-
+ * braces measure in case this rule is overridden.
+ */
+@layer base {
+  dialog[open] {
+    margin: auto;
+  }
+}

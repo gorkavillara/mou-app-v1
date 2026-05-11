@@ -23,6 +23,11 @@ export function NewPrescriptionDialog({ patientId, exercises }: Props) {
   const [sets, setSets] = useState<number>(3);
   const [reps, setReps] = useState<number>(20);
   const [sessionsPerDay, setSessionsPerDay] = useState<number>(8);
+  // FIX-3 (manual testing 2026-05-11): la duración pasa a ser opcional.
+  // Por defecto el tratamiento es abierto y termina cuando el doctor pulsa
+  // "Finalizar rehabilitación" (DischargeButton). El backend acepta
+  // `duration_days?: number` — si está en abierto, no enviamos la clave.
+  const [hasEndDate, setHasEndDate] = useState<boolean>(false);
   const [durationDays, setDurationDays] = useState<number>(14);
   const [startsOn, setStartsOn] = useState<string>(todayISO());
   const [error, setError] = useState<string | null>(null);
@@ -39,11 +44,8 @@ export function NewPrescriptionDialog({ patientId, exercises }: Props) {
     if (!open && dlg.open) dlg.close();
   }, [open]);
 
-  const totalReps =
-    Math.max(0, sets) *
-    Math.max(0, reps) *
-    Math.max(0, sessionsPerDay) *
-    Math.max(0, durationDays);
+  const repsPerDay = Math.max(0, sets) * Math.max(0, reps) * Math.max(0, sessionsPerDay);
+  const totalReps = repsPerDay * Math.max(0, durationDays);
 
   function handleClose() {
     setOpen(false);
@@ -57,20 +59,35 @@ export function NewPrescriptionDialog({ patientId, exercises }: Props) {
       setError('Selecciona un ejercicio.');
       return;
     }
+    if (hasEndDate && (!Number.isFinite(durationDays) || durationDays < 1)) {
+      setError('La duración debe ser un número de días positivo.');
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
+      // Open-ended treatments omit `duration_days` from the body — the
+      // backend Zod schema is strict and prefers absence over null.
+      const body: {
+        exercise_id: string;
+        sets: number;
+        reps_per_set: number;
+        sessions_per_day: number;
+        starts_on: string;
+        duration_days?: number;
+      } = {
+        exercise_id: exerciseId,
+        sets,
+        reps_per_set: reps,
+        sessions_per_day: sessionsPerDay,
+        starts_on: startsOn,
+      };
+      if (hasEndDate) body.duration_days = durationDays;
+
       const res = await fetch(`/api/doctor/patients/${patientId}/prescriptions`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          exercise_id: exerciseId,
-          sets,
-          reps_per_set: reps,
-          sessions_per_day: sessionsPerDay,
-          duration_days: durationDays,
-          starts_on: startsOn,
-        }),
+        body: JSON.stringify(body),
       });
 
       if (res.status === 201 || res.status === 200) {
@@ -106,7 +123,7 @@ export function NewPrescriptionDialog({ patientId, exercises }: Props) {
         ref={dialogRef}
         onClose={handleClose}
         onCancel={handleClose}
-        className="rounded-2xl p-0 backdrop:bg-gray-900/40 backdrop:backdrop-blur-sm w-[calc(100vw-2rem)] max-w-lg border border-gray-100 shadow-xl"
+        className="m-auto rounded-2xl p-0 backdrop:bg-gray-900/40 backdrop:backdrop-blur-sm w-[calc(100vw-2rem)] max-w-lg border border-gray-100 shadow-xl"
       >
         <form onSubmit={handleSubmit} className="bg-white rounded-2xl">
           <div className="flex items-center justify-between px-5 pt-5 pb-3">
@@ -152,37 +169,91 @@ export function NewPrescriptionDialog({ patientId, exercises }: Props) {
                 min={1}
                 onChange={setSessionsPerDay}
               />
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="prescription-starts-on"
+                  className="block text-[13px] font-medium text-gray-500 ml-1"
+                >
+                  Inicio
+                </label>
+                <input
+                  id="prescription-starts-on"
+                  type="date"
+                  value={startsOn}
+                  onChange={(e) => setStartsOn(e.target.value)}
+                  className="w-full h-11 px-3 bg-white border border-[#E5E5EA] rounded-[10px] text-[16px] focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF] focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="block text-[13px] font-medium text-gray-500 ml-1">
+                Final del tratamiento
+              </span>
+              <div
+                role="radiogroup"
+                aria-label="Final del tratamiento"
+                className="inline-flex items-center bg-[#F2F2F7] p-1 rounded-[10px] w-full"
+              >
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={!hasEndDate}
+                  onClick={() => setHasEndDate(false)}
+                  className={
+                    'flex-1 h-9 px-3 text-sm font-medium rounded-lg transition-colors ' +
+                    (!hasEndDate
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700')
+                  }
+                >
+                  Sin fecha de fin
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={hasEndDate}
+                  onClick={() => setHasEndDate(true)}
+                  className={
+                    'flex-1 h-9 px-3 text-sm font-medium rounded-lg transition-colors ' +
+                    (hasEndDate
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700')
+                  }
+                >
+                  Hasta una fecha
+                </button>
+              </div>
+              {!hasEndDate && (
+                <p className="text-xs text-gray-500 ml-1">
+                  El tratamiento permanecerá activo hasta que pulses
+                  &laquo;Finalizar rehabilitación&raquo;.
+                </p>
+              )}
+            </div>
+
+            {hasEndDate && (
               <NumberField
                 label="Duración (días)"
                 value={durationDays}
                 min={1}
                 onChange={setDurationDays}
               />
-            </div>
-
-            <div className="space-y-1.5">
-              <label
-                htmlFor="prescription-starts-on"
-                className="block text-[13px] font-medium text-gray-500 ml-1"
-              >
-                Inicio
-              </label>
-              <input
-                id="prescription-starts-on"
-                type="date"
-                value={startsOn}
-                onChange={(e) => setStartsOn(e.target.value)}
-                className="w-full h-11 px-3 bg-white border border-[#E5E5EA] rounded-[10px] text-[16px] focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF] focus:outline-none"
-              />
-            </div>
+            )}
 
             <div className="bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 text-sm text-blue-900">
               <span className="font-medium">{sets}</span> series ×{' '}
               <span className="font-medium">{reps}</span> reps ×{' '}
-              <span className="font-medium">{sessionsPerDay}</span> sesiones/día durante{' '}
-              <span className="font-medium">{durationDays}</span> días ={' '}
-              <span className="font-semibold">{totalReps.toLocaleString('es-ES')}</span> reps
-              totales
+              <span className="font-medium">{sessionsPerDay}</span> sesiones/día
+              {hasEndDate ? (
+                <>
+                  {' '}durante <span className="font-medium">{durationDays}</span> días ={' '}
+                  <span className="font-semibold">{totalReps.toLocaleString('es-ES')}</span>{' '}
+                  reps totales
+                </>
+              ) : (
+                <> (sin fecha de fin)</>
+              )}
             </div>
 
             {error && (

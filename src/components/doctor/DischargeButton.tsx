@@ -68,7 +68,7 @@ export function DischargeButton({ patientId, externalId, dischargedAt }: Props) 
         ref={dialogRef}
         onClose={handleClose}
         onCancel={handleClose}
-        className="rounded-2xl p-0 backdrop:bg-gray-900/40 backdrop:backdrop-blur-sm w-[calc(100vw-2rem)] max-w-md border border-gray-100 shadow-xl"
+        className="m-auto rounded-2xl p-0 backdrop:bg-gray-900/40 backdrop:backdrop-blur-sm w-[calc(100vw-2rem)] max-w-md border border-gray-100 shadow-xl"
       >
         <div className="bg-white rounded-2xl">
           <div className="flex items-center justify-between px-5 pt-5 pb-3">

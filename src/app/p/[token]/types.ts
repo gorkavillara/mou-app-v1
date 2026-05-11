@@ -38,9 +38,11 @@ export type PrescriptionPublic = {
   sets: number;
   reps_per_set: number;
   sessions_per_day: number;
-  duration_days: number;
+  // NULL = tratamiento abierto (acaba con discharge).
+  duration_days: number | null;
   starts_on: string;
-  ends_on: string;
+  // NULL si la prescripción es abierta (no tiene fecha de cierre).
+  ends_on: string | null;
   exercise: ExercisePublic | null;
 };
 

@@ -33,7 +33,7 @@ test.describe('Doctor patient detail', () => {
   );
 
   test(
-    'add a new prescription with live total reps preview',
+    'add a new prescription with explicit end date and live total reps preview',
     { tag: ['@critical', '@e2e', '@doctor-detail', '@DOCTOR-DETAIL-E2E-002'] },
     async ({ page }, testInfo) => {
       const externalId = generatePatientId('RX');
@@ -44,6 +44,23 @@ test.describe('Doctor patient detail', () => {
 
       const rxDialog = new NewPrescriptionDialogPO(page);
       await expect(rxDialog.dialog).toBeVisible();
+
+      // FIX-1: centered dialog (Tailwind 4 preflight wipes `margin: auto`).
+      const viewport = page.viewportSize();
+      if (viewport) {
+        const box = await rxDialog.dialog.boundingBox();
+        expect(box).not.toBeNull();
+        if (box) {
+          const offset = Math.abs(box.x + box.width / 2 - viewport.width / 2);
+          expect(offset).toBeLessThan(24);
+        }
+      }
+
+      // Default is "Sin fecha de fin" — toggle to a fixed-duration treatment.
+      await expect(rxDialog.openEndedPill).toHaveAttribute('aria-checked', 'true');
+      await rxDialog.withEndDatePill.click();
+      await expect(rxDialog.withEndDatePill).toHaveAttribute('aria-checked', 'true');
+
       await rxDialog.setsInput.fill('3');
       await rxDialog.repsInput.fill('20');
       await rxDialog.sessionsPerDayInput.fill('4');
@@ -51,6 +68,7 @@ test.describe('Doctor patient detail', () => {
       await expect(rxDialog.preview).toContainText('3');
       await expect(rxDialog.preview).toContainText('20');
       await expect(rxDialog.preview).toContainText('4');
+      await expect(rxDialog.preview).toContainText(/durante/);
       await expect(rxDialog.preview).toContainText(/3\.?360/); // 3 × 20 × 4 × 14
 
       await detail.snap(testInfo, 'new-prescription-dialog');
@@ -59,6 +77,40 @@ test.describe('Doctor patient detail', () => {
       await rxDialog.dialog.waitFor({ state: 'detached' });
       await expect(detail.prescriptionsSection()).toContainText(/Flexión|Extensión|series|reps/i);
       await detail.snap(testInfo, 'patient-detail-with-prescription');
+    },
+  );
+
+  test(
+    'add an open-ended prescription (no duration) — default flow',
+    { tag: ['@critical', '@e2e', '@doctor-detail', '@DOCTOR-DETAIL-E2E-004'] },
+    async ({ page }, testInfo) => {
+      const externalId = generatePatientId('RXOPEN');
+      await createPatient(page, externalId);
+
+      const detail = new DoctorDetailPage(page);
+      await detail.newPrescriptionButton().click();
+
+      const rxDialog = new NewPrescriptionDialogPO(page);
+      await expect(rxDialog.dialog).toBeVisible();
+
+      // Default mode is open-ended and the duration field is hidden.
+      await expect(rxDialog.openEndedPill).toHaveAttribute('aria-checked', 'true');
+      await expect(rxDialog.durationDaysInput).toHaveCount(0);
+
+      await rxDialog.setsInput.fill('3');
+      await rxDialog.repsInput.fill('20');
+      await rxDialog.sessionsPerDayInput.fill('4');
+
+      // Live preview never mentions "durante X días" while in open-ended mode.
+      await expect(rxDialog.preview).toContainText(/sin fecha de fin/i);
+      await expect(rxDialog.preview).not.toContainText(/durante/i);
+
+      await detail.snap(testInfo, 'new-prescription-dialog-open-ended');
+
+      await rxDialog.submitButton.click();
+      await rxDialog.dialog.waitFor({ state: 'detached' });
+      await expect(detail.prescriptionsSection()).toContainText(/Flexión|Extensión|series|reps/i);
+      await detail.snap(testInfo, 'patient-detail-with-open-ended-prescription');
     },
   );
 
