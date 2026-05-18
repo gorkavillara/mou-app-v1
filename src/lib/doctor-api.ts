@@ -1,96 +1,260 @@
-import { mockCohortData } from '@/data/mock-cohort';
+import 'server-only';
+import { headers, cookies } from 'next/headers';
+import type { PathologyCode, TrackedJoint } from './database.types';
 
-export interface MutuaPatientResponse {
+/**
+ * Doctor API client (server-side only).
+ *
+ * Wraps fetch() against our own /api/doctor/* routes, forwarding cookies so the
+ * Supabase session is preserved. Types here mirror the actual route responses
+ * (see src/app/api/doctor/...) — keep in sync if the contract changes.
+ */
+
+export type StatusFilter = 'all' | 'active' | 'discharged';
+
+// --- Adherence breakdown (B-13) -------------------------------------------
+
+export type AdherenceTotal = {
+  completed: number;
+  target: number;
+  pct: number | null;
+};
+
+export type AdherenceWindow = {
+  completed: number;
+  target: number;
+  pct: number | null;
+};
+
+export type AdherenceBreakdown = {
+  total: AdherenceTotal;
+  week: AdherenceWindow;
+};
+
+// --- List ------------------------------------------------------------------
+
+export type PatientListItem = {
   id: string;
-  nombre: string;
-  diagnostico: string;
-  ultimaFechaSesion: string;
-  metrics: {
-    ifrm: number;
-    adherencia: number;
-    romPromedio: number;
-    estado: 'active' | 'warning' | 'critical';
-  };
+  external_id: string;
+  pathology_code: PathologyCode | null;
+  started_at: string;
+  discharged_at: string | null;
+  // Backwards-compatible top-level fields (the list UI used these directly
+  // before B-13). New components should read `adherence` instead.
+  adherence_pct: number | null;
+  completed_sessions: number;
+  expected_sessions: number;
+  adherence: AdherenceBreakdown;
+};
+
+export type PatientListResponse = {
+  patients: PatientListItem[];
+};
+
+// --- Detail ----------------------------------------------------------------
+
+export type ExerciseSummary = {
+  id: string;
+  code: string;
+  name: string;
+  tracked_joints?: TrackedJoint[];
+  target_finger?: string;
+};
+
+export type PrescriptionRow = {
+  id: string;
+  patient_id: string;
+  exercise_id: string;
+  sets: number;
+  reps_per_set: number;
+  sessions_per_day: number;
+  // NULL = tratamiento abierto (acaba sólo con discharge).
+  duration_days: number | null;
+  starts_on: string;
+  replaces_id: string | null;
+  created_at: string;
+  exercise: ExerciseSummary | null;
+};
+
+export type SessionRow = {
+  id: string;
+  prescription_id: string;
+  started_at: string;
+  ended_at: string | null;
+  reps_completed: number;
+  target_reps: number;
+  completion_pct: number;
+  prescription: { id: string; exercise: ExerciseSummary | null } | null;
+};
+
+/**
+ * The detail endpoint preserves the legacy flat shape (completed_sessions,
+ * expected_sessions, adherence_pct) and adds the structured `total` + `week`
+ * breakdown alongside. UI should prefer the structured form.
+ */
+export type AdherenceRow = {
+  completed_sessions: number;
+  expected_sessions: number;
+  adherence_pct: number;
+  total: AdherenceTotal;
+  week: AdherenceWindow;
+};
+
+export type PatientDetail = {
+  id: string;
+  external_id: string;
+  pathology_code: PathologyCode | null;
+  access_token: string;
+  started_at: string;
+  discharged_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PatientDetailResponse = {
+  patient: PatientDetail;
+  prescriptions: PrescriptionRow[];
+  sessions: SessionRow[];
+  adherence: AdherenceRow | null;
+};
+
+// --- Progression (B-14) ----------------------------------------------------
+
+export type ProgressionPoint = {
+  day: string;
+  max_flexion: number | null;
+  max_extension: number | null;
+  samples: number;
+};
+
+export type ProgressionSeries = {
+  joint: string;
+  points: ProgressionPoint[];
+};
+
+export type ProgressionResponse = {
+  from: string;
+  to: string;
+  series: ProgressionSeries[];
+};
+
+// --- Alerts (B-18, last_session_at side-data) -----------------------------
+
+export type AlertEntry = {
+  patient_id: string;
+  external_id: string;
+  pathology_code: PathologyCode | null;
+  last_session_at: string | null;
+  hours_since_last: number;
+  has_ever_session: boolean;
+};
+
+export type AlertsResponse = {
+  threshold_hours: number;
+  generated_at: string;
+  patients: AlertEntry[];
+};
+
+// --- Internals -------------------------------------------------------------
+
+async function originAndCookies(): Promise<{ url: string; cookieHeader: string }> {
+  const h = await headers();
+  const c = await cookies();
+  const host = h.get('host') ?? 'localhost:3500';
+  const proto = h.get('x-forwarded-proto') ?? 'http';
+  const cookieHeader = c
+    .getAll()
+    .map(({ name, value }) => `${name}=${value}`)
+    .join('; ');
+  return { url: `${proto}://${host}`, cookieHeader };
 }
 
-export interface MutuaProgressResponse {
-  patientId: string;
-  nombre: string;
-  diagnostico: string;
-  historialSesiones: {
-    fecha: string;
-    maxFlexion: number;
-    duracionMinutos: number;
-  }[];
-  romPromedio: number;
-  adherencia: number;
-  desviacionObjetivo: number;
-  diasRehabilitacion: number;
-  prediccionRecuperacion?: number;
+async function doctorFetch<T>(path: string): Promise<{ data: T | null; status: number }> {
+  const { url, cookieHeader } = await originAndCookies();
+  const res = await fetch(`${url}${path}`, {
+    cache: 'no-store',
+    headers: { cookie: cookieHeader },
+  });
+  if (!res.ok) return { data: null, status: res.status };
+  const data = (await res.json()) as T;
+  return { data, status: res.status };
 }
 
-export function getMutuaPatients(): MutuaPatientResponse[] {
-  return mockCohortData.map(p => ({
-    id: p.id,
-    nombre: p.name,
-    diagnostico: p.diagnosis,
-    ultimaFechaSesion: p.lastSession,
-    metrics: {
-      ifrm: p.ifrm,
-      adherencia: Math.round(p.adherence * 100),
-      romPromedio: p.romAvg,
-      estado: p.status
-    }
-  }));
+export async function fetchPatients(params: {
+  search?: string;
+  status?: StatusFilter;
+}): Promise<{ data: PatientListResponse | null; status: number }> {
+  const qs = new URLSearchParams();
+  if (params.search) qs.set('search', params.search);
+  if (params.status && params.status !== 'all') qs.set('status', params.status);
+  const suffix = qs.toString();
+  return doctorFetch<PatientListResponse>(`/api/doctor/patients${suffix ? `?${suffix}` : ''}`);
 }
 
-export function getMutuaPatientProgress(patientId: string): MutuaProgressResponse | null {
-  const patient = mockCohortData.find(p => p.id === patientId);
-  if (!patient) return null;
-
-  const historial = generateMockSessionHistory(patientId);
-  const romPromedio = historial.reduce((sum, s) => sum + s.maxFlexion, 0) / historial.length;
-  const adherence = patient.adherence;
-  const diasRehabilitacion = Math.floor(Math.random() * 30) + 10;
-  const objetivoDia50 = 90;
-  const desviacion = romPromedio - objetivoDia50;
-
-  return {
-    patientId: patient.id,
-    nombre: patient.name,
-    diagnostico: patient.diagnosis,
-    historialSesiones: historial,
-    romPromedio: Math.round(romPromedio),
-    adherencia: Math.round(adherence * 100),
-    desviacionObjetivo: Math.round(desviacion),
-    diasRehabilitacion,
-    prediccionRecuperacion: diasRehabilitacion + Math.ceil((90 - romPromedio) / 3)
-  };
+export async function fetchPatientDetail(
+  id: string,
+): Promise<{ data: PatientDetailResponse | null; status: number }> {
+  return doctorFetch<PatientDetailResponse>(`/api/doctor/patients/${encodeURIComponent(id)}`);
 }
 
-function generateMockSessionHistory(patientId: string): { fecha: string; maxFlexion: number; duracionMinutos: number }[] {
-  const sessions = [];
-  const baseDate = new Date();
-  baseDate.setDate(baseDate.getDate() - 30);
-
-  const patient = mockCohortData.find(p => p.id === patientId);
-  const baseRom = patient?.romAvg || 60;
-
-  for (let i = 0; i < 12; i++) {
-    const date = new Date(baseDate);
-    date.setDate(date.getDate() + i * 2.5);
-    
-    sessions.push({
-      fecha: date.toISOString().split('T')[0],
-      maxFlexion: Math.round(baseRom - 10 + Math.random() * 20 + (i * 2)),
-      duracionMinutos: Math.round(15 + Math.random() * 20)
-    });
-  }
-
-  return sessions;
+/**
+ * B-14 — patient progression series. `from`/`to` are inclusive YYYY-MM-DD
+ * strings; if omitted, the API defaults to the patient's `started_at` and
+ * today, respectively.
+ */
+export async function fetchPatientProgression(
+  id: string,
+  params: { from?: string; to?: string; joint?: string[] } = {},
+): Promise<{ data: ProgressionResponse | null; status: number }> {
+  const qs = new URLSearchParams();
+  if (params.from) qs.set('from', params.from);
+  if (params.to) qs.set('to', params.to);
+  for (const j of params.joint ?? []) qs.append('joint', j);
+  const suffix = qs.toString();
+  return doctorFetch<ProgressionResponse>(
+    `/api/doctor/patients/${encodeURIComponent(id)}/progression${suffix ? `?${suffix}` : ''}`,
+  );
 }
 
-export function validateApiKey(headers: Headers): boolean {
-  const apiKey = headers.get('x-api-key');
-  return apiKey === 'mock-mutua-key-2025' || apiKey === 'dev-key';
+/**
+ * B-18 — fetches "stale" patients for F-16 (last session indicator on the
+ * list). The endpoint only returns patients whose last session is older than
+ * `threshold_hours` (or who have no session at all) AND who have at least one
+ * active prescription. We use the schema-allowed maximum (720h ≈ 30 days),
+ * which is more than enough for the pilot window. Patients NOT in the
+ * response are either "fresh" (no prescription) or "healthy" (sessioned
+ * within the window) — we infer that on the page.
+ */
+export async function fetchAlerts(
+  thresholdHours = 720,
+): Promise<{ data: AlertsResponse | null; status: number }> {
+  return doctorFetch<AlertsResponse>(
+    `/api/doctor/alerts?threshold_hours=${thresholdHours}`,
+  );
+}
+
+/**
+ * The exercises catalog is small (2 rows in Fase 1) and readable by any
+ * authenticated user. We hit Supabase directly from the server component to
+ * avoid creating a new HTTP route just for this.
+ */
+export async function fetchExercisesCatalog(): Promise<ExerciseSummary[]> {
+  const { createSupabaseServerClient } = await import('./supabase/server');
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase
+    .from('exercises')
+    .select('id, code, name, tracked_joints, target_finger')
+    .order('code');
+  return (data ?? []) as ExerciseSummary[];
+}
+
+/**
+ * Build the public patient URL from the access_token. Uses request headers so
+ * it works behind a proxy in production and on localhost in dev.
+ */
+export async function buildPatientAccessUrl(accessToken: string): Promise<string> {
+  const h = await headers();
+  const host = h.get('host') ?? 'localhost:3500';
+  const proto = h.get('x-forwarded-proto') ?? 'http';
+  return `${proto}://${host}/p/${accessToken}`;
 }

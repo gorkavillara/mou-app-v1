@@ -8,6 +8,10 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
+    // Vitest only owns the unit/integration suite under src/test/.
+    // Playwright e2e specs live in tests/ and have a different runner.
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    exclude: ['tests/**', 'node_modules/**', '.next/**'],
   },
   resolve: {
     alias: {

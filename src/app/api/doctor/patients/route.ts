@@ -1,118 +1,181 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { NextRequest, NextResponse } from 'next/server';
+import { ZodError } from 'zod';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import {
+  createPatientSchema,
+  listPatientsQuerySchema,
+} from '@/lib/validation/patients';
+import { errorResponse, zodErrorResponse } from '@/lib/api/errors';
 
-// GET - Obtener pacientes del doctor actual
-export async function GET() {
-  const supabase = await createSupabaseServerClient()
-
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user?.email) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+/**
+ * B-06 — POST /api/doctor/patients
+ *
+ * Create a patient for the authenticated doctor. The middleware has already
+ * gated this route (401/403). RLS enforces doctor_id = auth.uid(); we rely on
+ * that as source of truth.
+ */
+export async function POST(request: NextRequest) {
+  let payload: unknown;
+  try {
+    payload = await request.json();
+  } catch {
+    return errorResponse('invalid_json', 400, 'Body must be valid JSON');
   }
 
-  // Buscar el doctor
-  const { data: doctor } = await supabase
-    .from('doctors')
-    .select('id, name')
-    .eq('email', user.email)
-    .single()
-
-  if (!doctor) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  let body;
+  try {
+    body = createPatientSchema.parse(payload);
+  } catch (err) {
+    if (err instanceof ZodError) return zodErrorResponse(err);
+    throw err;
   }
 
-  // Obtener pacientes asignados a este doctor
-  const { data: assignments } = await supabase
-    .from('patient_assignments')
-    .select('patientId, status')
-    .eq('doctorId', doctor.id)
-    .eq('status', 'ACTIVE')
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return errorResponse('unauthenticated', 401);
 
-  if (!assignments || assignments.length === 0) {
-    return NextResponse.json([])
-  }
-
-  const patientIds = assignments.map(a => a.patientId)
-
-  // Obtener datos de pacientes
-  const { data: patients } = await supabase
+  const { data: patient, error } = await supabase
     .from('patients')
-    .select('id, name, email, phone, diagnosis, ifrm, adherence, created_at')
-    .in('id', patientIds)
+    .insert({
+      doctor_id: user.id,
+      external_id: body.external_id,
+      pathology_code: body.pathology_code ?? null,
+    })
+    .select(
+      'id, doctor_id, external_id, pathology_code, access_token, started_at, discharged_at, created_at, updated_at',
+    )
+    .single();
 
-  return NextResponse.json(patients || [])
+  if (error) {
+    // 23505 = unique_violation. The relevant constraint here is
+    // unique (doctor_id, external_id).
+    if (error.code === '23505') {
+      return errorResponse(
+        'duplicate_external_id',
+        409,
+        'A patient with that external_id already exists for this doctor',
+      );
+    }
+    return errorResponse('db_error', 500, error.message);
+  }
+
+  const origin = request.nextUrl.origin;
+  const public_url = `${origin}/p/${patient.access_token}`;
+
+  return NextResponse.json({ patient, public_url }, { status: 201 });
 }
 
-// POST - Crear nuevo paciente (doctor crea paciente y envía invitación)
-export async function POST(request: NextRequest) {
-  const supabase = await createSupabaseServerClient()
-
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user?.email) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  const { data: doctor } = await supabase
-    .from('doctors')
-    .select('id, name')
-    .eq('email', user.email)
-    .single()
-
-  if (!doctor) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-
-  const body = await request.json()
-  const { name, email, phone, diagnosis } = body
-
+/**
+ * B-07 — GET /api/doctor/patients
+ *
+ * List patients for the authenticated doctor. Adherence is joined client-side
+ * because `patient_adherence` is a view that only includes patients with at
+ * least one prescription (LEFT JOIN at the SQL level would still need a view
+ * or RPC; doing two parallel queries keeps the route honest and the types simple).
+ */
+export async function GET(request: NextRequest) {
+  const url = request.nextUrl;
+  let query;
   try {
-    // 1. Crear usuario en Auth
-    const tempPassword = Math.random().toString(36).slice(-8)
-    
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email,
-      password: tempPassword,
-      options: {
-        data: { name, role: 'patient' }
-      }
-    })
-
-    if (authError) throw authError
-    if (!authData.user) throw new Error('No se pudo crear el usuario')
-
-    // 2. Obtener una mutua por defecto
-    const { data: insurance } = await supabase
-      .from('insurances')
-      .select('id')
-      .limit(1)
-      .single()
-
-    // 3. Crear paciente
-    await supabase.from('patients').insert({
-      id: authData.user.id,
-      name,
-      email,
-      phone,
-      diagnosis: diagnosis || null,
-      insuranceId: insurance?.id || null
-    })
-
-    // 4. Asignar al doctor actual
-    await supabase.from('patient_assignments').insert({
-      patientId: authData.user.id,
-      doctorId: doctor.id,
-      insuranceId: insurance?.id || null,
-      status: 'ACTIVE'
-    })
-
-    // 5. Enviar email de invitación
-    await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/reset-password`
-    })
-
-    return NextResponse.json({ success: true, message: 'Paciente creado e invitación enviada' })
-  } catch (error) {
-    console.error('Error creating patient:', error)
-    return NextResponse.json({ error: 'Error al crear paciente' }, { status: 500 })
+    query = listPatientsQuerySchema.parse({
+      search: url.searchParams.get('search') ?? undefined,
+      status: url.searchParams.get('status') ?? undefined,
+    });
+  } catch (err) {
+    if (err instanceof ZodError) return zodErrorResponse(err);
+    throw err;
   }
+
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return errorResponse('unauthenticated', 401);
+
+  // Build patients query.
+  let q = supabase
+    .from('patients')
+    .select(
+      'id, external_id, pathology_code, started_at, discharged_at',
+    );
+
+  if (query.status === 'active') q = q.is('discharged_at', null);
+  if (query.status === 'discharged') q = q.not('discharged_at', 'is', null);
+  if (query.search && query.search.length > 0) {
+    // Escape % and _ to avoid wildcard injection.
+    const safe = query.search.replace(/[%_\\]/g, (m) => `\\${m}`);
+    q = q.ilike('external_id', `%${safe}%`);
+  }
+
+  // Sort: active first (discharged_at IS NULL → top), then by started_at desc.
+  // Supabase JS doesn't support `IS NULL FIRST/LAST` directly, so we sort by
+  // `discharged_at` with nullsFirst:true (nulls = active = first) ascending.
+  q = q
+    .order('discharged_at', { ascending: true, nullsFirst: true })
+    .order('started_at', { ascending: false });
+
+  // B-13: read the breakdown view (total + 7d window) instead of just the
+  // total. The view is doctor-scoped through patient_adherence which already
+  // exposes doctor_id; RLS on the underlying tables filters rows.
+  const [patientsRes, adherenceRes] = await Promise.all([
+    q,
+    supabase
+      .from('patient_adherence_breakdown')
+      .select(
+        'patient_id, total_completed, total_target, total_pct, week_completed, week_target, week_pct',
+      ),
+  ]);
+
+  if (patientsRes.error) {
+    return errorResponse('db_error', 500, patientsRes.error.message);
+  }
+  if (adherenceRes.error) {
+    return errorResponse('db_error', 500, adherenceRes.error.message);
+  }
+
+  type BreakdownRow = {
+    patient_id: string;
+    total_completed: number | null;
+    total_target: number | null;
+    total_pct: number | null;
+    week_completed: number | null;
+    week_target: number | null;
+    week_pct: number | null;
+  };
+  const adherenceByPatient = new Map<string, BreakdownRow>();
+  for (const a of (adherenceRes.data ?? []) as BreakdownRow[]) {
+    adherenceByPatient.set(a.patient_id, a);
+  }
+
+  const patients = (patientsRes.data ?? []).map((p) => {
+    const ad = adherenceByPatient.get(p.id);
+    return {
+      id: p.id,
+      external_id: p.external_id,
+      pathology_code: p.pathology_code,
+      started_at: p.started_at,
+      discharged_at: p.discharged_at,
+      // Backwards-compatible top-level fields (UI today reads these).
+      adherence_pct: ad?.total_pct ?? null,
+      completed_sessions: ad?.total_completed ?? 0,
+      expected_sessions: ad?.total_target ?? 0,
+      // New: structured breakdown for the next frontend round.
+      adherence: {
+        total: {
+          completed: ad?.total_completed ?? 0,
+          target: ad?.total_target ?? 0,
+          pct: ad?.total_pct ?? null,
+        },
+        week: {
+          completed: ad?.week_completed ?? 0,
+          target: ad?.week_target ?? 0,
+          pct: ad?.week_pct ?? null,
+        },
+      },
+    };
+  });
+
+  return NextResponse.json({ patients });
 }

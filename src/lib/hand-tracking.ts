@@ -316,7 +316,565 @@ export function updateRepCounter(counter: RepCounter, angle: number): RepCounter
   return next;
 }
 
-// --- Enhanced ROM: MCP and IF angles ---
+// --- Frame quality + rep counter (IA-05, IA-06) ---
+//
+// The legacy `createRepCounter` / `updateRepCounter` API above operates on a
+// single bipolar "finger angle" (positive flexion / negative extension) in raw
+// degrees. Fase 1 moves to per-joint normalized degrees: 0° = straight, 90°
+// (or 100°/80° depending on the joint) = full flexion, with optional negative
+// values for hyperextension on wrist/MCP. Threshold ±15° on the legacy scale
+// is meaningless on the new scale because raw and normalized degrees are not
+// the same units.
+//
+// The new API below (`createJointRepCounter` / `updateJointRepCounter`) takes
+// clinical degrees directly, uses two thresholds (enter / exit) for hysteresis
+// and tracks per-joint peaks so we can store flexor data per rep.
+
+/**
+ * Quality signal for a single frame in the rep window.
+ *
+ * `detected` is the only mandatory field — everything else is optional because
+ * MediaPipe sometimes omits handedness or per-landmark visibility scores.
+ */
+export type FrameQuality = {
+  /** Any hand at all detected this frame. */
+  detected: boolean;
+  /** MediaPipe handedness label, when present. */
+  handedness?: 'Left' | 'Right';
+  /** Confidence of the handedness label, 0..1. */
+  handednessScore?: number;
+  /** Average of `landmark.visibility` across the 21 keypoints, 0..1. */
+  visibilityScore?: number;
+};
+
+/** Rep-level quality classification; matches the DB enum on `rep_measurements`. */
+export type RepQualityFlag = 'clean' | 'low_visibility' | 'low_confidence' | 'partial';
+
+export type RepQualityBreakdown = {
+  flag: RepQualityFlag;
+  framesMissing: number;
+  framesTotal: number;
+};
+
+// Heuristic constants. Centralised for visibility — tune these against real
+// pilot recordings, not synthetic tests.
+//
+// VISIBILITY_FLOOR: per-frame threshold below which we treat the frame as
+//   missing. MediaPipe's visibility is not always populated; when absent we
+//   treat the frame as visible (we trust `detected`) so calibrations don't
+//   drift on devices that don't report it.
+// LOW_VIS_RATIO / PARTIAL_VIS_RATIO: rep-level missing-frame ratios. Anything
+//   above PARTIAL is "the camera basically lost the hand" → unusable for ROM.
+//   Between LOW_VIS and PARTIAL we keep the rep but the doctor should know not
+//   to trust the peaks.
+// LOW_CONFIDENCE_HANDEDNESS: average handedness score under which we flag the
+//   rep — even with perfect visibility, MediaPipe occasionally swaps left/
+//   right and that's a strong "untrustworthy" signal for ROM.
+const VISIBILITY_FLOOR = 0.4;
+const LOW_VIS_RATIO = 0.3;
+const PARTIAL_VIS_RATIO = 0.5;
+const LOW_CONFIDENCE_HANDEDNESS = 0.7;
+
+/**
+ * Classifies the per-frame quality history of a single rep into one of four
+ * flags. Order matters: we report the worst applicable flag.
+ *
+ * Severity ladder (worst → best):
+ *   partial         — camera basically lost the hand (>50% missing)
+ *   low_visibility  — significant frames missing or out-of-floor (>30% missing)
+ *   low_confidence  — handedness confidence too low on average
+ *   clean           — none of the above
+ */
+export function classifyRepQuality(
+  perFrameQuality: FrameQuality[],
+): RepQualityBreakdown {
+  const framesTotal = perFrameQuality.length;
+  if (framesTotal === 0) {
+    return { flag: 'partial', framesMissing: 0, framesTotal: 0 };
+  }
+
+  let framesMissing = 0;
+  let confidenceSum = 0;
+  let confidenceCount = 0;
+
+  for (const f of perFrameQuality) {
+    const visUnder =
+      typeof f.visibilityScore === 'number' && f.visibilityScore < VISIBILITY_FLOOR;
+    if (!f.detected || visUnder) {
+      framesMissing += 1;
+    }
+    if (typeof f.handednessScore === 'number') {
+      confidenceSum += f.handednessScore;
+      confidenceCount += 1;
+    }
+  }
+
+  const missingRatio = framesMissing / framesTotal;
+  const avgConfidence = confidenceCount > 0 ? confidenceSum / confidenceCount : 1;
+
+  let flag: RepQualityFlag;
+  if (missingRatio > PARTIAL_VIS_RATIO) {
+    flag = 'partial';
+  } else if (missingRatio > LOW_VIS_RATIO) {
+    flag = 'low_visibility';
+  } else if (avgConfidence < LOW_CONFIDENCE_HANDEDNESS) {
+    flag = 'low_confidence';
+  } else {
+    flag = 'clean';
+  }
+
+  return { flag, framesMissing, framesTotal };
+}
+
+// Default thresholds in clinical degrees (post-normalization). Crossing
+// FLEXION_ENTER_DEG top-down opens a rep; crossing FLEXION_EXIT_DEG
+// bottom-up closes it. The gap between them is the hysteresis band that
+// prevents a finger oscillating around one threshold from double-counting.
+const FLEXION_ENTER_DEG = 35;
+const FLEXION_EXIT_DEG = 10;
+// Eight frames at ~30 fps ≈ 270 ms — long enough to absorb single-frame
+// MediaPipe glitches and short enough that it doesn't lag the live HUD.
+const SMOOTHING_WINDOW = 8;
+
+export type JointPeakMap = Partial<Record<JointName, { peakFlex: number; peakExt: number }>>;
+
+export type JointRepCounterOptions = {
+  flexionEnter?: number;
+  flexionExit?: number;
+  smoothingWindow?: number;
+};
+
+/**
+ * Per-rep state captured every time `updateJointRepCounter` closes a rep.
+ *
+ * `peaks` carries the maximum flexion/extension reached on every joint that
+ * was passed to `updateJointRepCounter` during the rep — so even when MCP
+ * drives the counter, PIP/DIP peaks land in the rep payload.
+ */
+export type CompletedJointRep = {
+  repNumber: number;
+  peaks: JointPeakMap;
+  framesMissing: number;
+  framesTotal: number;
+  quality: RepQualityBreakdown;
+};
+
+export type JointRepCounter = {
+  flexionEnter: number;
+  flexionExit: number;
+  smoothingWindow: number;
+  angleHistory: number[];
+  /** 'open' = below exit threshold, 'flexed' = above enter threshold. */
+  phase: 'open' | 'flexed' | null;
+  repCount: number;
+  /** Joint peaks accumulated for the rep currently in flight. */
+  currentPeaks: JointPeakMap;
+  /** Per-frame quality samples accumulated for the rep currently in flight. */
+  currentFrameQuality: FrameQuality[];
+  /** Set on the tick where a rep just closed; consumers can react and ignore on subsequent ticks. */
+  completedRep?: CompletedJointRep;
+};
+
+export function createJointRepCounter(opts: JointRepCounterOptions = {}): JointRepCounter {
+  return {
+    flexionEnter: opts.flexionEnter ?? FLEXION_ENTER_DEG,
+    flexionExit: opts.flexionExit ?? FLEXION_EXIT_DEG,
+    smoothingWindow: opts.smoothingWindow ?? SMOOTHING_WINDOW,
+    angleHistory: [],
+    phase: null,
+    repCount: 0,
+    currentPeaks: {},
+    currentFrameQuality: [],
+    completedRep: undefined,
+  };
+}
+
+/**
+ * Advances the rep counter by one frame.
+ *
+ * @param counter             Previous counter state (treated as immutable; the function returns a new object).
+ * @param normalizedAngleDeg  Driver angle in clinical degrees (post-normalization).
+ *                            Positive = flexion, negative = extension. Pass `NaN`/`null`-equivalent
+ *                            via the `frameQuality.detected = false` channel; this function expects a number.
+ * @param jointAnglesByName   Optional map of every joint's normalized angle this frame, used to
+ *                            update per-joint peaks. Keys must be JointName (`MCP` | `PIP` | `DIP` | `wrist`).
+ * @param frameQuality        Optional per-frame quality signal. When omitted we synthesise a
+ *                            "clean detected frame" from the fact that we got an angle at all.
+ *
+ * Hysteresis: a rep opens when the smoothed driver crosses `flexionEnter` from below, and closes
+ * when it crosses `flexionExit` from above. Tiny oscillations around either threshold cannot
+ * complete a rep on their own — both thresholds must be crossed in order.
+ */
+export function updateJointRepCounter(
+  counter: JointRepCounter,
+  normalizedAngleDeg: number,
+  jointAnglesByName?: Partial<Record<JointName, number>>,
+  frameQuality?: FrameQuality,
+): JointRepCounter {
+  const next: JointRepCounter = {
+    ...counter,
+    angleHistory: [...counter.angleHistory, normalizedAngleDeg],
+    currentPeaks: { ...counter.currentPeaks },
+    currentFrameQuality: [...counter.currentFrameQuality],
+    completedRep: undefined,
+  };
+
+  if (next.angleHistory.length > next.smoothingWindow) {
+    next.angleHistory = next.angleHistory.slice(-next.smoothingWindow);
+  }
+
+  // Record per-frame quality. A consumer that didn't give us anything is
+  // treated as "detected, no extra info".
+  next.currentFrameQuality.push(
+    frameQuality ?? { detected: !Number.isNaN(normalizedAngleDeg) },
+  );
+
+  // Update per-joint peaks for the rep currently in flight. Positive values
+  // contribute to peakFlex; negatives to peakExt.
+  if (jointAnglesByName) {
+    for (const [k, vRaw] of Object.entries(jointAnglesByName)) {
+      if (typeof vRaw !== 'number' || Number.isNaN(vRaw)) continue;
+      const joint = k as JointName;
+      const slot = next.currentPeaks[joint] ?? { peakFlex: 0, peakExt: 0 };
+      if (vRaw > 0) {
+        slot.peakFlex = Math.max(slot.peakFlex, Math.round(vRaw));
+      } else if (vRaw < 0) {
+        slot.peakExt = Math.max(slot.peakExt, Math.round(Math.abs(vRaw)));
+      }
+      next.currentPeaks[joint] = slot;
+    }
+  }
+
+  // We need the smoothing buffer half-full before trusting the average; this
+  // mirrors the legacy counter and prevents a single huge first frame from
+  // flipping the state machine immediately.
+  const minSamples = Math.max(2, Math.floor(next.smoothingWindow / 2));
+  if (next.angleHistory.length < minSamples) {
+    return next;
+  }
+
+  const smoothed =
+    next.angleHistory.reduce((a, b) => a + b, 0) / next.angleHistory.length;
+
+  // State machine.
+  if (smoothed >= next.flexionEnter) {
+    next.phase = 'flexed';
+  } else if (smoothed <= next.flexionExit) {
+    if (counter.phase === 'flexed') {
+      // Rep just closed: snapshot peaks + quality, increment, reset accumulators.
+      next.repCount = counter.repCount + 1;
+      const quality = classifyRepQuality(next.currentFrameQuality);
+      next.completedRep = {
+        repNumber: next.repCount,
+        peaks: next.currentPeaks,
+        framesMissing: quality.framesMissing,
+        framesTotal: quality.framesTotal,
+        quality,
+      };
+      next.currentPeaks = {};
+      next.currentFrameQuality = [];
+    }
+    next.phase = 'open';
+  }
+  // else: in the dead band between exit and enter — no transition.
+
+  return next;
+}
+
+// --- Rep coaching (IA-09) ---
+//
+// When the patient closes a rep without reaching a sensible flexion peak (well
+// below the clinical maximum but still high enough to signal a half-hearted
+// rep), we count it as "low". After N consecutive lows we emit a soft hint
+// suggesting they push further — once. The counter resets after the hint fires
+// so it doesn't spam the patient mid-session.
+//
+// Default `threshold = 60` (clinical degrees on the normalized scale): MCP
+// clinical max sits at 90°, so 60° catches reps that look like the patient is
+// only doing half-flexion. Tune against pilot data, not synthetic tests.
+//
+// Default `consecutiveThreshold = 3`: matches the wording in IA-09 ("3 reps
+// consecutivas"). The grace period for first reps lives in the consumer
+// (ExerciseSession).
+
+export type RepCoachingState = {
+  consecutiveLowReps: number;
+  threshold: number;
+  consecutiveThreshold: number;
+};
+
+const DEFAULT_REP_COACHING_THRESHOLD = 60;
+const DEFAULT_REP_COACHING_CONSECUTIVE = 3;
+
+export function createRepCoaching(
+  opts: Partial<RepCoachingState> = {},
+): RepCoachingState {
+  return {
+    consecutiveLowReps: opts.consecutiveLowReps ?? 0,
+    threshold: opts.threshold ?? DEFAULT_REP_COACHING_THRESHOLD,
+    consecutiveThreshold:
+      opts.consecutiveThreshold ?? DEFAULT_REP_COACHING_CONSECUTIVE,
+  };
+}
+
+/**
+ * Records a completed rep and returns the next coaching state plus an optional
+ * suggestion. The suggestion fires when `consecutiveLowReps` reaches the
+ * configured threshold; the counter is reset on fire so the prompt cannot
+ * repeat back-to-back. A non-low rep also resets the counter.
+ */
+export function updateRepCoaching(
+  state: RepCoachingState,
+  completed: { peakFlexion: number },
+): { state: RepCoachingState; suggestion: 'push_more' | null } {
+  const isLow = completed.peakFlexion < state.threshold;
+  if (!isLow) {
+    return {
+      state: { ...state, consecutiveLowReps: 0 },
+      suggestion: null,
+    };
+  }
+  const nextCount = state.consecutiveLowReps + 1;
+  if (nextCount >= state.consecutiveThreshold) {
+    return {
+      state: { ...state, consecutiveLowReps: 0 },
+      suggestion: 'push_more',
+    };
+  }
+  return {
+    state: { ...state, consecutiveLowReps: nextCount },
+    suggestion: null,
+  };
+}
+
+// --- Handedness mismatch detection (IA-11) ---
+//
+// MediaPipe field names vary across builds (`handedness` vs `handednesses`,
+// each as `Array<Array<{ categoryName, score }>>`). We accept either and the
+// inner-array shape, returning a normalized `{ side, score }` or `null` when
+// nothing usable is present.
+
+type HandednessRecord = { categoryName?: string; score?: number };
+
+export type HandednessReading = {
+  side: 'Left' | 'Right';
+  score: number;
+};
+
+export function readHandedness(result: unknown): HandednessReading | null {
+  if (!result || typeof result !== 'object') return null;
+  const r = result as {
+    handednesses?: HandednessRecord[][];
+    handedness?: HandednessRecord[][];
+  };
+  const buckets = r.handednesses ?? r.handedness;
+  if (!Array.isArray(buckets) || buckets.length === 0) return null;
+  const first = buckets[0];
+  if (!Array.isArray(first) || first.length === 0) return null;
+  // Pick the highest-scoring entry in this hand's bucket.
+  let best: HandednessRecord | null = null;
+  for (const entry of first) {
+    if (!entry || typeof entry !== 'object') continue;
+    if (
+      entry.categoryName !== 'Left' &&
+      entry.categoryName !== 'Right'
+    ) {
+      continue;
+    }
+    if (typeof entry.score !== 'number') continue;
+    if (!best || (entry.score ?? 0) > (best.score ?? 0)) best = entry;
+  }
+  if (!best || typeof best.score !== 'number') return null;
+  return {
+    side: best.categoryName as 'Left' | 'Right',
+    score: best.score,
+  };
+}
+
+/**
+ * Aggregates a window of per-frame handedness readings into a single verdict.
+ * Returns `null` if no readings are present. Otherwise returns the dominant
+ * side (mode) and the mean score across the readings whose side matches the
+ * mode — i.e. an "agreement-weighted" confidence.
+ */
+export function summarizeHandednessSamples(
+  samples: HandednessReading[],
+): { side: 'Left' | 'Right'; score: number } | null {
+  if (samples.length === 0) return null;
+  let left = 0;
+  let right = 0;
+  let leftSum = 0;
+  let rightSum = 0;
+  for (const s of samples) {
+    if (s.side === 'Left') {
+      left += 1;
+      leftSum += s.score;
+    } else {
+      right += 1;
+      rightSum += s.score;
+    }
+  }
+  if (left === 0 && right === 0) return null;
+  if (left >= right) {
+    return { side: 'Left', score: left > 0 ? leftSum / left : 0 };
+  }
+  return { side: 'Right', score: right > 0 ? rightSum / right : 0 };
+}
+
+// --- Per-joint angle calculation (Fase 1, IA-02) ---
+// See docs/obsidian-vault/12-Convencion-angular.md for the geometric convention.
+
+export type JointName = 'wrist' | 'MCP' | 'PIP' | 'DIP';
+
+export type JointAngles = {
+  /** Metacarpophalangeal joint (base of finger). 0° = straight, ~90° = flexed to palm. */
+  MCP: number;
+  /** Proximal interphalangeal joint. 0° = straight, ~100° = full flexion. */
+  PIP: number;
+  /** Distal interphalangeal joint (fingertip). 0° = straight, ~80° = full flexion. */
+  DIP: number;
+};
+
+export type FingerJointAngles = Record<FingerName, JointAngles>;
+
+function angleBetweenVectors(
+  ax: number, ay: number, az: number,
+  bx: number, by: number, bz: number,
+): number {
+  const dot = ax * bx + ay * by + az * bz;
+  const magA = Math.sqrt(ax * ax + ay * ay + az * az);
+  const magB = Math.sqrt(bx * bx + by * by + bz * bz);
+  if (magA === 0 || magB === 0) return 0;
+  const cos = Math.max(-1, Math.min(1, dot / (magA * magB)));
+  return Math.acos(cos) * (180 / Math.PI);
+}
+
+/**
+ * Computes MCP, PIP and DIP angles for a single finger.
+ *
+ * - MCP: between wrist→MCP and MCP→PIP. Sign carries flexion (+) / hyperextension (−).
+ * - PIP: between MCP→PIP and PIP→DIP. Always non-negative (PIP cannot hyperextend).
+ * - DIP: between PIP→DIP and DIP→TIP.
+ *
+ * Returned values are RAW measured degrees. Apply `normalizeJointAngle` to map
+ * them to the clinical 0–90° (or 0–100/0–80) range.
+ */
+export function calculateJointAngles(landmarks: Point[], finger: FingerConfig): JointAngles {
+  const wrist = landmarks[0];
+  const mcp = landmarks[finger.mcpIndex];
+  const pip = landmarks[finger.pipIndex];
+  const dip = landmarks[finger.dipIndex];
+  const tip = landmarks[finger.tipIndex];
+
+  // MCP: wrist→MCP versus MCP→PIP. Preserve sign for hyperextension.
+  const a1x = mcp.x - wrist.x, a1y = mcp.y - wrist.y, a1z = mcp.z - wrist.z;
+  const b1x = pip.x - mcp.x,   b1y = pip.y - mcp.y,   b1z = pip.z - mcp.z;
+  const mcpMag = angleBetweenVectors(a1x, a1y, a1z, b1x, b1y, b1z);
+  const mcpCross2D = a1x * b1y - a1y * b1x;
+  const mcpAngle = mcpCross2D >= 0 ? mcpMag : -mcpMag;
+
+  // PIP: MCP→PIP versus PIP→DIP. Magnitude only.
+  const a2x = pip.x - mcp.x,   a2y = pip.y - mcp.y,   a2z = pip.z - mcp.z;
+  const b2x = dip.x - pip.x,   b2y = dip.y - pip.y,   b2z = dip.z - pip.z;
+  const pipAngle = angleBetweenVectors(a2x, a2y, a2z, b2x, b2y, b2z);
+
+  // DIP: PIP→DIP versus DIP→TIP. Magnitude only.
+  const a3x = dip.x - pip.x,   a3y = dip.y - pip.y,   a3z = dip.z - pip.z;
+  const b3x = tip.x - dip.x,   b3y = tip.y - dip.y,   b3z = tip.z - dip.z;
+  const dipAngle = angleBetweenVectors(a3x, a3y, a3z, b3x, b3y, b3z);
+
+  return { MCP: mcpAngle, PIP: pipAngle, DIP: dipAngle };
+}
+
+export function calculateAllJointAngles(landmarks: Point[]): FingerJointAngles {
+  const out = {} as FingerJointAngles;
+  for (const finger of FINGERS) {
+    out[finger.name] = calculateJointAngles(landmarks, finger);
+  }
+  return out;
+}
+
+/**
+ * Wrist flexion/extension angle.
+ *
+ * @param landmarks    The 21 hand landmarks from MediaPipe.
+ * @param forearmPoint Optional virtual forearm reference projected from the wrist
+ *                     opposite to the hand. If omitted, uses wrist→middleMCP as
+ *                     the only reference vector (less reliable; prefer providing it).
+ *                     Positive = palmar flexion, negative = dorsal extension.
+ */
+export function calculateWristAngle(landmarks: Point[], forearmPoint?: Point): number {
+  const wrist = landmarks[0];
+  const middleMCP = landmarks[9];
+
+  if (!forearmPoint) {
+    return 0;
+  }
+
+  const ax = wrist.x - forearmPoint.x;
+  const ay = wrist.y - forearmPoint.y;
+  const az = wrist.z - forearmPoint.z;
+  const bx = middleMCP.x - wrist.x;
+  const by = middleMCP.y - wrist.y;
+  const bz = middleMCP.z - wrist.z;
+
+  const mag = angleBetweenVectors(ax, ay, az, bx, by, bz);
+  const cross2D = ax * by - ay * bx;
+  return cross2D >= 0 ? mag : -mag;
+}
+
+// --- Calibration & normalization (IA-03) ---
+// Maps raw measured degrees to the clinical 0–X° range.
+// IMPORTANT: the `measured*` values are placeholders pending validation
+// with Javi + goniometer (see docs/obsidian-vault/12-Convencion-angular.md).
+
+export type JointCalibration = {
+  measuredOpen: number;
+  measuredClosed: number;
+  clinicalMax: number;
+  /** Negative bound for joints that hyperextend (wrist, MCP). */
+  clinicalMin?: number;
+};
+
+export const JOINT_CALIBRATION: Record<JointName, JointCalibration> = {
+  wrist: { measuredOpen: 15, measuredClosed: 95,  clinicalMax: 90, clinicalMin: -70 },
+  MCP:   { measuredOpen: 12, measuredClosed: 100, clinicalMax: 90, clinicalMin: -30 },
+  PIP:   { measuredOpen: 10, measuredClosed: 110, clinicalMax: 100 },
+  DIP:   { measuredOpen: 8,  measuredClosed: 95,  clinicalMax: 80 },
+};
+
+/**
+ * Linearly maps a raw measured angle to the clinical range using the joint's
+ * calibration. Values outside the measured envelope are clamped.
+ *
+ * For joints with `clinicalMin` (hyperextension capable), negative inputs are
+ * mapped to the negative side of the clinical range with a separate slope so
+ * that 0° always sits at the neutral position.
+ */
+export function normalizeJointAngle(measuredDeg: number, joint: JointName): number {
+  const cal = JOINT_CALIBRATION[joint];
+  if (measuredDeg >= 0) {
+    const range = cal.measuredClosed - cal.measuredOpen;
+    if (range <= 0) return 0;
+    const clamped = Math.max(cal.measuredOpen, Math.min(cal.measuredClosed, measuredDeg));
+    return ((clamped - cal.measuredOpen) / range) * cal.clinicalMax;
+  }
+  const minClinical = cal.clinicalMin ?? 0;
+  if (minClinical === 0) return 0;
+  const clamped = Math.max(-cal.measuredOpen, measuredDeg);
+  return (clamped / cal.measuredOpen) * Math.abs(minClinical);
+}
+
+export function normalizeFingerJointAngles(raw: JointAngles): JointAngles {
+  return {
+    MCP: normalizeJointAngle(raw.MCP, 'MCP'),
+    PIP: normalizeJointAngle(raw.PIP, 'PIP'),
+    DIP: normalizeJointAngle(raw.DIP, 'DIP'),
+  };
+}
+
+// --- Legacy aliases retained for in-flight callers (to be removed once
+// /exercises is rewired against the new API). ---
 
 export type ROMAngles = {
   mcp: number;
@@ -324,62 +882,15 @@ export type ROMAngles = {
   ifDistal: number;
 };
 
+/** @deprecated use `calculateJointAngles(...).MCP` */
 export function calculateMCPAngle(landmarks: Point[], finger: FingerConfig): number {
-  const wrist = landmarks[0];
-  const mcp = landmarks[finger.mcpIndex];
-  const pip = landmarks[finger.pipIndex];
-
-  const v1 = { x: mcp.x - wrist.x, y: mcp.y - wrist.y, z: mcp.z - wrist.z };
-  const v2 = { x: pip.x - mcp.x, y: pip.y - mcp.y, z: pip.z - mcp.z };
-
-  const dot = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
-  const mag1 = Math.sqrt(v1.x ** 2 + v1.y ** 2 + v1.z ** 2);
-  const mag2 = Math.sqrt(v2.x ** 2 + v2.y ** 2 + v2.z ** 2);
-
-  if (mag1 === 0 || mag2 === 0) return 0;
-
-  const cosAngle = Math.max(-1, Math.min(1, dot / (mag1 * mag2)));
-  const angle = Math.acos(cosAngle) * (180 / Math.PI);
-
-  const cross = v1.x * v2.y - v1.y * v2.x;
-  return cross > 0 ? angle : -angle;
+  return calculateJointAngles(landmarks, finger).MCP;
 }
 
+/** @deprecated use `calculateJointAngles` */
 export function calculateIFAngle(landmarks: Point[], finger: FingerConfig): ROMAngles {
-  const mcp = landmarks[finger.mcpIndex];
-  const pip = landmarks[finger.pipIndex];
-  const dip = landmarks[finger.dipIndex];
-  const tip = landmarks[finger.tipIndex];
-
-  const v1 = { x: pip.x - mcp.x, y: pip.y - mcp.y, z: pip.z - mcp.z };
-  const v2 = { x: dip.x - pip.x, y: dip.y - pip.y, z: dip.z - pip.z };
-  const dot1 = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
-  const mag1_ = Math.sqrt(v1.x ** 2 + v1.y ** 2 + v1.z ** 2);
-  const mag2_ = Math.sqrt(v2.x ** 2 + v2.y ** 2 + v2.z ** 2);
-
-  let ifProximal = 0;
-  if (mag1_ > 0 && mag2_ > 0) {
-    const cosAngle1 = Math.max(-1, Math.min(1, dot1 / (mag1_ * mag2_)));
-    ifProximal = Math.acos(cosAngle1) * (180 / Math.PI);
-  }
-
-  const v3 = { x: dip.x - pip.x, y: dip.y - pip.y, z: dip.z - pip.z };
-  const v4 = { x: tip.x - dip.x, y: tip.y - dip.y, z: tip.z - dip.z };
-  const dot2 = v3.x * v4.x + v3.y * v4.y + v3.z * v4.z;
-  const mag3 = Math.sqrt(v3.x ** 2 + v3.y ** 2 + v3.z ** 2);
-  const mag4 = Math.sqrt(v4.x ** 2 + v4.y ** 2 + v4.z ** 2);
-
-  let ifDistal = 0;
-  if (mag3 > 0 && mag4 > 0) {
-    const cosAngle2 = Math.max(-1, Math.min(1, dot2 / (mag3 * mag4)));
-    ifDistal = Math.acos(cosAngle2) * (180 / Math.PI);
-  }
-
-  return {
-    mcp: calculateMCPAngle(landmarks, finger),
-    ifProximal,
-    ifDistal,
-  };
+  const j = calculateJointAngles(landmarks, finger);
+  return { mcp: j.MCP, ifProximal: j.PIP, ifDistal: j.DIP };
 }
 
 // --- Hand Signature for Identity Validation ---
