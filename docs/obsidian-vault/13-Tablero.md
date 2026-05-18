@@ -26,6 +26,7 @@ _(vacío)_
 
 ## ✅ Hecho
 
+- [x] **G-5** `/dev/calibration` gateada por `CALIBRATION_KEY` (no por NODE_ENV) → accesible en Vercel con `?key=`; review ✓ + tester ✓ ✓ 2026-05-11 #infra
 - [x] **FIX-1** Modal centrado: regla `dialog[open] { margin: auto }` global (Tailwind 4 preflight) + `m-auto` por dialog ✓ 2026-05-11 #frontend
 - [x] **FIX-2** `button { cursor: pointer }` globales en `@layer base` (Tailwind 4 los quitó por defecto) ✓ 2026-05-11 #frontend
 - [x] **FIX-3** `duration_days` opcional: migración + Zod + `B-11/B-13/B-18` open-ended + UI con pill "Sin fecha de fin" ✓ 2026-05-11 #backend #frontend

@@ -13,9 +13,9 @@ Javi prueba que la herramienta tiene sentido **como médico** (dar de alta un pa
 
 ---
 
-## ⚠️ Bloqueante conocido (resolver antes de la Fase 3)
+## ℹ️ Acceso a la calibración (resuelto)
 
-La pantalla de calibración de ángulos (`/dev/calibration`) **hoy no es accesible en la web publicada** — está bloqueada en producción a propósito. Para que Javi pueda validar ángulos desde Valencia sin que Gorka esté delante, **Gorka tiene que habilitar el acceso** (Fase 0, tarea G-5). Hasta que eso esté hecho, la Fase 3 no se puede empezar.
+La pantalla de calibración de ángulos (`/dev/calibration`) ya es accesible en la web publicada detrás de una clave. En Vercel está la env var `CALIBRATION_KEY`; Javi entra con la URL `https://mou-v1.vercel.app/dev/calibration?key=<valor>` que le pasa Gorka. En local (sin esa var) la página sigue abierta sin clave. El bloqueante de la Fase 3 (tarea G-5) está cerrado.
 
 ---
 
@@ -23,17 +23,17 @@ La pantalla de calibración de ángulos (`/dev/calibration`) **hoy no es accesib
 
 Checklist técnico. Cuando esté todo ✅, avisa a Javi de que puede empezar la Fase 1.
 
-- [ ] **G-1** Confirmar que el deploy responde: abrir https://mou-v1.vercel.app/login → debe verse el formulario "Mou · Panel del doctor".
-- [ ] **G-2** Confirmar las env vars en Vercel (Project Settings → Environment Variables): `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Apuntan al proyecto `qkvujadxflslsfkezxpo` (el mismo que en local, así que el doctor Javi ya existe en esa BD).
-- [ ] **G-3** Verificar el login de Javi contra producción:
+- [x] **G-1** Confirmar que el deploy responde: abrir https://mou-v1.vercel.app/login → debe verse el formulario "Mou · Panel del doctor".
+- [x] **G-2** Confirmar las env vars en Vercel (Project Settings → Environment Variables): `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Apuntan al proyecto `qkvujadxflslsfkezxpo` (el mismo que en local, así que el doctor Javi ya existe en esa BD).
+- [x] **G-3** Verificar el login de Javi contra producción:
   ```bash
   curl -s -X POST "https://qkvujadxflslsfkezxpo.supabase.co/auth/v1/token?grant_type=password" \
     -H "apikey: <SUPABASE_ANON_KEY>" -H "Content-Type: application/json" \
     -d '{"email":"javi@mou.local","password":"javimou"}' | head -c 80
   ```
   Debe devolver un `access_token`. Si no → re-ejecutar `npx tsx scripts/create-doctor.ts --email javi@mou.local --password javimou --label "Dr. Javi"`.
-- [ ] **G-4** Borrar pacientes de prueba acumulados para que Javi empiece con la lista limpia: `npx tsx scripts/cleanup-e2e-data.ts` (solo limpia los del doctor e2e; los de Javi se borran a mano si hubiera). Decidir si la lista de Javi arranca vacía.
-- [ ] **G-5** **[Bloqueante Fase 3]** Habilitar `/dev/calibration` en producción detrás de una clave. Hoy la página hace `notFound()` si `NODE_ENV === 'production'`. Opción recomendada: cambiar el gate a `searchParams.key === process.env.CALIBRATION_KEY`, añadir `CALIBRATION_KEY` en Vercel, y pasarle a Javi la URL completa con `?key=...`. *(Esto es desarrollo — si quieres, pídemelo y lo implemento; aquí solo lo dejo señalado.)*
+- [x] **G-4** Borrar pacientes de prueba acumulados para que Javi empiece con la lista limpia: `npx tsx scripts/cleanup-e2e-data.ts` (solo limpia los del doctor e2e; los de Javi se borran a mano si hubiera). Decidir si la lista de Javi arranca vacía.
+- [x] **G-5** Hecho. En Vercel está la env var `CALIBRATION_KEY`; Gorka le pasa a Javi la URL `https://mou-v1.vercel.app/dev/calibration?key=<valor>`. En local (sin la var) la página sigue abierta.
 - [ ] **G-6** Tener a mano el móvil de Javi o un Android/iPhone para la Fase 2 (la cámara). Confirmar que Vercel sirve por HTTPS (lo hace) — `getUserMedia` necesita HTTPS, y Vercel ya lo da.
 - [ ] **G-7** Avisar a Javi: "ya puedes entrar, empieza por la Fase 1 del plan".
 

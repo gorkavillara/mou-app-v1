@@ -61,5 +61,10 @@ export default defineConfig({
     timeout: 180_000,
     stdout: 'ignore',
     stderr: 'pipe',
+    env: {
+      // Exercises the production (gated) path of /dev/calibration so the
+      // @calibration spec can assert the secret-key behaviour.
+      CALIBRATION_KEY: 'e2e-cal-key',
+    },
   },
 });
