@@ -34,6 +34,7 @@
 - [[07-Plan-piloto-20-pacientes]] — cronograma día a día hasta 2026-05-15
 - [[11-Riesgos-y-bloqueos]] — qué nos puede tirar el piloto
 - **[[13-Tablero]]** — kanban (Backlog · En curso · En revisión · Hecho). **Source of truth del estado de cada tarea**.
+- **[[tests/plan-pruebas-piloto]]** — qué prueba Javi (Valencia) y qué hace Gorka (San Sebastián) en el deploy https://mou-v1.vercel.app/
 
 ## 🚦 Próxima acción
 Mira [[13-Tablero]] para ver qué hay en curso. Si "En curso" está vacío, coger la tarea P0 más arriba en Backlog.
