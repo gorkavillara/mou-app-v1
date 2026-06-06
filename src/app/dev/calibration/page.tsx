@@ -1,6 +1,13 @@
 import { notFound } from 'next/navigation';
 import { CalibrationView } from './CalibrationView';
 
+// The gate must be evaluated PER REQUEST. Without this, a build where
+// CALIBRATION_KEY happens to be unset never touches `searchParams`, so Next
+// prerenders the page as STATIC and the cached open HTML is served forever —
+// even after the env var is added (observed on Vercel, 2026-05-20: all three
+// gate cases returned 200). force-dynamic removes that class of bug entirely.
+export const dynamic = 'force-dynamic';
+
 /**
  * IA-04 — `/dev/calibration` developer-only page.
  *
