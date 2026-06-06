@@ -35,10 +35,13 @@ export class DoctorListPage extends BasePage {
   }
 }
 
+export type InjuredFingerValue = 'pulgar' | 'indice' | 'medio' | 'anular' | 'menique';
+
 export class NewPatientDialogPO {
   readonly dialog: Locator;
   readonly externalIdInput: Locator;
   readonly pathologySelect: Locator;
+  readonly injuredFingerSelect: Locator;
   readonly submitButton: Locator;
   readonly errorBox: Locator;
 
@@ -46,13 +49,19 @@ export class NewPatientDialogPO {
     this.dialog = page.getByRole('dialog');
     this.externalIdInput = page.getByLabel('ID del paciente');
     this.pathologySelect = page.getByLabel(/Patolog/i);
+    this.injuredFingerSelect = page.getByLabel(/Dedo lesionado/i);
     this.submitButton = page.getByRole('button', { name: /Crear paciente/i });
     this.errorBox = this.dialog.locator('div.bg-red-50');
   }
 
-  async fillAndSubmit(externalId: string, pathology?: 'flexor' | 'extensor' | 'otros'): Promise<void> {
+  async fillAndSubmit(
+    externalId: string,
+    pathology?: 'flexor' | 'extensor' | 'otros',
+    injuredFinger?: InjuredFingerValue,
+  ): Promise<void> {
     await this.externalIdInput.fill(externalId);
     if (pathology) await this.pathologySelect.selectOption(pathology);
+    if (injuredFinger) await this.injuredFingerSelect.selectOption(injuredFinger);
     await this.submitButton.click();
   }
 }

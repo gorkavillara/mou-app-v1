@@ -115,6 +115,36 @@ test.describe('Doctor patient detail', () => {
   );
 
   test(
+    'create with an injured finger shows the badge and can be changed inline',
+    { tag: ['@high', '@e2e', '@doctor-detail', '@DOCTOR-DETAIL-E2E-005'] },
+    async ({ page }, testInfo) => {
+      const externalId = generatePatientId('FINGER');
+      const list = new DoctorListPage(page);
+      await list.goto();
+      await list.newPatientButton.click();
+      const dialog = new NewPatientDialogPO(page);
+      await dialog.fillAndSubmit(externalId, undefined, 'menique');
+      await page.waitForURL(/\/doctor\/pacientes\/[0-9a-f-]+/);
+
+      const detail = new DoctorDetailPage(page);
+      await detail.expectLoaded(externalId);
+
+      // Badge reflects the finger chosen at creation.
+      await expect(detail.injuredFingerBadge()).toContainText('Meñique');
+      await detail.snap(testInfo, 'patient-detail-injured-finger');
+
+      // Change it inline (PATCH) → badge updates after the refresh.
+      await detail.injuredFingerSelect().selectOption('indice');
+      await expect(detail.injuredFingerBadge()).toContainText('Índice');
+
+      // Persists across a reload.
+      await page.reload();
+      await expect(detail.injuredFingerBadge()).toContainText('Índice');
+      await expect(detail.injuredFingerSelect()).toHaveValue('indice');
+    },
+  );
+
+  test(
     'discharge a patient hides the discharge button and toggles status',
     { tag: ['@high', '@e2e', '@doctor-detail', '@DOCTOR-DETAIL-E2E-003'] },
     async ({ page }, testInfo) => {

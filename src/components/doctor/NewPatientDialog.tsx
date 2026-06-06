@@ -4,12 +4,25 @@ import { X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+import type { InjuredFinger } from '@/lib/database.types';
+
 type Props = {
   open: boolean;
   onClose: () => void;
 };
 
-const ID_PATTERN = /^[A-Za-z0-9_\-/]+$/;
+// UX-4: external_id now allows single spaces between word tokens (backend
+// widened the same way) — the surgeon wanted to type e.g. "PRUEBA 1".
+const ID_PATTERN = /^[A-Za-z0-9_\-/]+( [A-Za-z0-9_\-/]+)*$/;
+
+// UX-4: operated finger options (capitalized Spanish labels).
+const INJURED_FINGER_OPTIONS: { value: InjuredFinger; label: string }[] = [
+  { value: 'pulgar', label: 'Pulgar' },
+  { value: 'indice', label: 'Índice' },
+  { value: 'medio', label: 'Medio' },
+  { value: 'anular', label: 'Anular' },
+  { value: 'menique', label: 'Meñique' },
+];
 
 export function NewPatientDialog({ open, onClose }: Props) {
   const router = useRouter();
@@ -17,6 +30,7 @@ export function NewPatientDialog({ open, onClose }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [externalId, setExternalId] = useState('');
   const [pathology, setPathology] = useState<'' | 'flexor' | 'extensor' | 'otros'>('');
+  const [injuredFinger, setInjuredFinger] = useState<'' | InjuredFinger>('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -34,6 +48,7 @@ export function NewPatientDialog({ open, onClose }: Props) {
   function reset() {
     setExternalId('');
     setPathology('');
+    setInjuredFinger('');
     setError(null);
     setSubmitting(false);
   }
@@ -53,16 +68,22 @@ export function NewPatientDialog({ open, onClose }: Props) {
       return;
     }
     if (!ID_PATTERN.test(id)) {
-      setError('Solo letras, números y - _ / están permitidos.');
+      setError('Solo letras, números, espacios y - _ / están permitidos.');
       return;
     }
 
     setSubmitting(true);
     try {
-      const body: { external_id: string; pathology_code?: 'flexor' | 'extensor' | 'otros' } = {
+      const body: {
+        external_id: string;
+        pathology_code?: 'flexor' | 'extensor' | 'otros';
+        injured_finger?: InjuredFinger;
+      } = {
         external_id: id,
       };
       if (pathology) body.pathology_code = pathology;
+      // UX-4: only include when explicitly chosen (never send null on create).
+      if (injuredFinger) body.injured_finger = injuredFinger;
 
       const res = await fetch('/api/doctor/patients', {
         method: 'POST',
@@ -114,8 +135,9 @@ export function NewPatientDialog({ open, onClose }: Props) {
 
         <div className="px-5 pb-5 space-y-4">
           <p className="text-xs text-gray-500">
-            Identifica al paciente con su nº de historia clínica o un código correlativo. No
-            guardes nombre ni datos personales.
+            Identifica al paciente con su nº de historia clínica o un código correlativo (se
+            permiten espacios, p.ej. <span className="font-medium">PRUEBA 1</span>). No guardes
+            nombre ni datos personales.
           </p>
 
           <div className="space-y-1.5">
@@ -128,7 +150,7 @@ export function NewPatientDialog({ open, onClose }: Props) {
               type="text"
               required
               autoComplete="off"
-              pattern="[A-Za-z0-9_\-/]+"
+              pattern="[A-Za-z0-9_\-/]+( [A-Za-z0-9_\-/]+)*"
               placeholder="HC-48721"
               value={externalId}
               onChange={(e) => setExternalId(e.target.value)}
@@ -152,6 +174,25 @@ export function NewPatientDialog({ open, onClose }: Props) {
               <option value="flexor">Flexor</option>
               <option value="extensor">Extensor</option>
               <option value="otros">Otros</option>
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="injured_finger" className="block text-[13px] font-medium text-gray-500 ml-1">
+              Dedo lesionado (opcional)
+            </label>
+            <select
+              id="injured_finger"
+              value={injuredFinger}
+              onChange={(e) => setInjuredFinger(e.target.value as '' | InjuredFinger)}
+              className="w-full h-11 px-3 bg-white border border-[#E5E5EA] rounded-[10px] text-[17px] text-gray-900 focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF] focus:outline-none"
+            >
+              <option value="">Sin especificar</option>
+              {INJURED_FINGER_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
             </select>
           </div>
 

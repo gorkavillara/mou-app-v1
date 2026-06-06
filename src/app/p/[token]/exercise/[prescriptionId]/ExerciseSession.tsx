@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Camera, CheckCircle2, Loader2, RotateCcw } from 'lucide-react';
 import {
@@ -14,6 +14,7 @@ import {
   summarizeHandednessSamples,
   updateRepCoaching,
   type FingerJointAngles,
+  type FingerName,
   type FingerStatusMap,
   type HandednessReading,
   type JointAngles,
@@ -66,11 +67,24 @@ import type {
  * `quality_flag: 'low_visibility'` so the doctor knows not to trust the peaks.
  */
 
-type Phase = 'intro' | 'preparing' | 'running' | 'done';
+// UX-2 (surgeon, 2026-05-20): the session is run SERIES by SERIES. The counter
+// must read "1/20" per set, pause between sets (`resting`), then resume at 1/20
+// — never a single "1/100". `resting` keeps the camera stream alive but stops
+// the rAF loop and the rep counter until the patient taps "Empezar serie n".
+type Phase = 'intro' | 'preparing' | 'running' | 'resting' | 'done';
 
 // Watchdog: if no decodable video frame arrives within this window we assume
 // the camera is stuck (the surgeon's black-screen case) and offer a retry.
 const CAMERA_WATCHDOG_MS = 4000;
+
+// UX-4: human labels for the operated finger (capitalized, Spanish).
+const FINGER_LABELS: Record<FingerName, string> = {
+  pulgar: 'Pulgar',
+  indice: 'Índice',
+  medio: 'Medio',
+  anular: 'Anular',
+  menique: 'Meñique',
+};
 
 type Props = {
   token: string;
@@ -147,13 +161,53 @@ function pickFingerForRep(targetFinger: PrescriptionPublic['exercise'] extends i
 }
 
 export function ExerciseSession({ token, prescription, patient }: Props) {
-  void patient; // patient ID is anonymous; available if we later want to render it
   const exercise = prescription.exercise!;
-  const targetReps = prescription.sets * prescription.reps_per_set;
+  const sets = Math.max(1, prescription.sets);
+  const repsPerSet = Math.max(1, prescription.reps_per_set);
+  const targetReps = sets * repsPerSet;
   const trackedJoints = exercise.tracked_joints;
-  const driverFinger = pickFingerForRep(exercise.target_finger);
+
+  // UX-4: if the patient has an operated finger, the measurement is driven by
+  // THAT finger (and `drawHand` paints it orange). Otherwise we fall back to
+  // the exercise's `target_finger` (e.g. the long fingers for "all").
+  const injuredFinger = patient.injured_finger;
+  const driverFinger: FingerName | 'all' =
+    injuredFinger ?? pickFingerForRep(exercise.target_finger);
+  const driverFingerLabel =
+    driverFinger === 'all' ? null : FINGER_LABELS[driverFinger];
+
+  // UX-4: finger status map for `drawHand`. The operated finger is `injured`
+  // (orange overlay); everything else stays `normal`. Memoized so the rAF loop
+  // closure (`renderFrame`) keeps a stable identity across renders.
+  const fingerStatus: FingerStatusMap = useMemo(
+    () =>
+      injuredFinger ? { ...ALL_NORMAL, [injuredFinger]: 'injured' } : ALL_NORMAL,
+    [injuredFinger],
+  );
+
+  // UX-2: spelled-out dose for the intro (matches PatientHome wording).
+  const doseSentence = (() => {
+    const seriesWord = sets === 1 ? 'serie' : 'series';
+    const repWord = repsPerSet === 1 ? 'repetición' : 'repeticiones';
+    const timesWord =
+      prescription.sessions_per_day === 1 ? 'vez al día' : 'veces al día';
+    return `${sets} ${seriesWord} de ${repsPerSet} ${repWord}, ${prescription.sessions_per_day} ${timesWord}`;
+  })();
 
   const [phase, setPhase] = useState<Phase>('intro');
+  // Review follow-up (2026-05-20): `finishSession` is captured by the
+  // memoized rAF pipeline (`processLandmarks` → `renderFrame`), which is
+  // created while phase is still 'intro'. Guarding on the `phase` state
+  // inside that stale closure made the guard see 'intro' forever, so a
+  // session that reached its rep target never transitioned to `done` nor
+  // POSTed. The guard must read this ref instead of the state.
+  const phaseRef = useRef<Phase>('intro');
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+  // UX-2: 1-based current set. Reps within the set are tracked in `repCount`
+  // (reset to 0 at the start of every set).
+  const [currentSet, setCurrentSet] = useState(1);
   const [permissionError, setPermissionError] = useState<string | null>(null);
   // BUG-1 — watchdog flag. When true, the `preparing` phase swaps its spinner
   // for an in-place "Reintentar" button without leaving the session.
@@ -195,7 +249,13 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   const firstFrameRef = useRef(false);
 
   // Rep tracking ref state (not driving renders directly — we sample to UI refs).
+  // UX-2: `repCountRef` is reps WITHIN THE CURRENT SET (0..repsPerSet). The
+  // globally increasing rep index used for `rep_index` in the DB payload lives
+  // in `globalRepRef`, so the API contract (1..sets*reps) is untouched. The
+  // current set (1-based) is mirrored in `currentSetRef` for the rAF loop.
   const repCountRef = useRef(0);
+  const globalRepRef = useRef(0);
+  const currentSetRef = useRef(1);
   const directionRef = useRef<'open' | 'flexed' | null>(null);
   const angleHistoryRef = useRef<number[]>([]);
   const currentRepRef = useRef<RepRecord>({
@@ -428,7 +488,11 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
         directionRef.current === 'flexed'
       ) {
         // Completed one rep cycle (open → flex → open).
-        const completed = { ...rec, rep_index: repCountRef.current };
+        // UX-2: the DB `rep_index` stays GLOBALLY increasing across sets
+        // (1..sets*reps), so the API contract is untouched. `repCountRef`
+        // counts reps WITHIN the current set (drives the "Rep X de N" UI).
+        globalRepRef.current += 1;
+        const completed = { ...rec, rep_index: globalRepRef.current };
         repHistoryRef.current.push(completed);
         repCountRef.current += 1;
         setRepCount(repCountRef.current);
@@ -439,10 +503,11 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
         // coaching state machine. After a warm-up grace of the first 3 reps,
         // if the helper returns a `push_more` suggestion we surface the toast.
         // Previously `updateRepCoaching` was imported but never invoked, so the
-        // surgeon never saw any coaching ("NO SALE NADA DE AVISOS").
+        // surgeon never saw any coaching ("NO SALE NADA DE AVISOS"). Grace is
+        // measured against the GLOBAL rep count so it isn't reset each set.
         const completedPeakFlex = completed.perJoint[driverJoint]?.peakFlex ?? 0;
         const REP_COACHING_GRACE = 3;
-        if (repCountRef.current > REP_COACHING_GRACE) {
+        if (globalRepRef.current > REP_COACHING_GRACE) {
           const { state: nextCoaching, suggestion } = updateRepCoaching(
             repCoachingRef.current,
             { peakFlexion: completedPeakFlex },
@@ -453,9 +518,10 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
           }
         }
 
-        // Reset rolling rep record.
+        // Reset rolling rep record (rep_index will be set when the next rep
+        // closes; keep it provisional at the next global index here).
         currentRepRef.current = {
-          rep_index: repCountRef.current,
+          rep_index: globalRepRef.current,
           perJoint: {},
           framesTotal: 0,
           framesMissing: 0,
@@ -464,16 +530,24 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
         // Reset the displayed "peak this rep" so the indicator resets too.
         displayPeakRef.current = 0;
 
-        if (repCountRef.current >= targetReps) {
-          finishSession();
+        // UX-2: end-of-set handling.
+        if (repCountRef.current >= repsPerSet) {
+          if (currentSetRef.current >= sets) {
+            // Last set finished → summary + POST as before.
+            finishSession();
+          } else {
+            // More sets to go → pause and show the rest screen.
+            startRest();
+          }
         }
       } else if (directionRef.current === null) {
         directionRef.current = 'open';
       }
     },
-    // finishSession defined below; eslint disabled for the same reason as above.
+    // finishSession / startRest defined below; eslint disabled for the same
+    // reason as above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [driverFinger, targetReps, trackedJoints, showToast],
+    [driverFinger, repsPerSet, sets, trackedJoints, showToast],
   );
 
   const renderFrame = useCallback(() => {
@@ -529,7 +603,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
         rect.height,
         video.videoWidth || rect.width,
         video.videoHeight || rect.height,
-        ALL_NORMAL,
+        fingerStatus,
         fingerAngles,
       );
       processLandmarks(hand);
@@ -538,7 +612,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     }
 
     scheduleNextFrame();
-  }, [processLandmarks]);
+  }, [processLandmarks, fingerStatus]);
 
   const scheduleNextFrame = useCallback(() => {
     rafRef.current = requestAnimationFrame(renderFrame);
@@ -546,7 +620,11 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
 
   // ---------- transitions ----------
   const finishSession = useCallback(() => {
-    if (phase !== 'running') return;
+    // Allow ending from `running` (rep target reached / "Terminar") and from
+    // `resting` (UX-2 "Terminar ahora" between sets). Ignore otherwise.
+    // NOTE: read the ref, not the state — this callback is invoked from the
+    // rAF pipeline whose closure was created back in the 'intro' render.
+    if (phaseRef.current !== 'running' && phaseRef.current !== 'resting') return;
     stopLoop();
 
     // Aggregate per-joint averages across all completed reps.
@@ -573,7 +651,39 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
 
     setSummary({ perJoint, repsCompleted: repHistoryRef.current.length });
     setPhase('done');
-  }, [phase, stopLoop, trackedJoints]);
+  }, [stopLoop, trackedJoints]);
+
+  // UX-2 — between sets: pause the rAF loop (stops counting) but KEEP the
+  // camera stream alive so resuming is instant. The friendly rest panel is
+  // rendered in the `resting` phase.
+  const startRest = useCallback(() => {
+    stopLoop();
+    directionRef.current = null;
+    setPhase('resting');
+  }, [stopLoop]);
+
+  // UX-2 — tap "Empezar serie n+1": advance the set, reset the per-set rep
+  // counter and the rolling rep record, and resume the loop at rep 1 of the
+  // new set. The global rep index and the accumulated rep history are
+  // preserved so the payload total stays correct.
+  const resumeSet = useCallback(() => {
+    currentSetRef.current += 1;
+    setCurrentSet(currentSetRef.current);
+    repCountRef.current = 0;
+    setRepCount(0);
+    directionRef.current = null;
+    angleHistoryRef.current = [];
+    displayHistoryRef.current = [];
+    displayPeakRef.current = 0;
+    currentRepRef.current = {
+      rep_index: globalRepRef.current,
+      perJoint: {},
+      framesTotal: 0,
+      framesMissing: 0,
+    };
+    setPhase('running');
+    scheduleNextFrame();
+  }, [scheduleNextFrame]);
 
   // POST when entering "done".
   useEffect(() => {
@@ -766,7 +876,12 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
 
     // Reset rep + display accumulators, then start the rAF loop. The loop will
     // flip the phase to `running` once it decodes the first frame.
+    // UX-2: also reset the per-set and global counters so a fresh "Empezar"
+    // always starts at Serie 1 · Rep 0.
     repCountRef.current = 0;
+    globalRepRef.current = 0;
+    currentSetRef.current = 1;
+    setCurrentSet(1);
     repHistoryRef.current = [];
     angleHistoryRef.current = [];
     directionRef.current = null;
@@ -848,8 +963,21 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
               Ejercicio
             </p>
             <h1 className="mt-2 text-[32px] font-semibold leading-tight tracking-tight">
-              {targetReps} repeticiones de {exercise.name}
+              {exercise.name}
             </h1>
+            {/* UX-1 — spell the dose out in full ("3 series de 20 */}
+            {/* repeticiones, 4 veces al día"). Patients get lost on raw totals. */}
+            <p
+              data-testid="dose-sentence"
+              className="mt-2 text-[18px] font-semibold leading-snug text-[#007AFF]"
+            >
+              {doseSentence}
+            </p>
+            {driverFingerLabel ? (
+              <p className="mt-1 text-[15px] text-gray-600">
+                Vamos a medir tu <span className="font-semibold">{driverFingerLabel.toLowerCase()}</span>.
+              </p>
+            ) : null}
             {exercise.description ? (
               <p className="mt-4 text-[16px] leading-relaxed text-gray-600">
                 {exercise.description}
@@ -908,12 +1036,14 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     );
   }
 
-  if (phase === 'preparing' || phase === 'running') {
+  if (phase === 'preparing' || phase === 'running' || phase === 'resting') {
     return (
       <main className="relative min-h-screen w-full overflow-hidden bg-black text-white">
-        {/* BUG-1 — video + canvas are mounted in BOTH `preparing` and */}
-        {/* `running`, so the stream can attach to an existing element and the */}
-        {/* loop can decode the first frame before we reveal the HUD. */}
+        {/* BUG-1 — video + canvas are mounted in `preparing`, `running` AND */}
+        {/* `resting` (UX-2), so the stream can attach to an existing element, */}
+        {/* the loop can decode the first frame before we reveal the HUD, and */}
+        {/* the rest screen between sets keeps the camera alive for an instant */}
+        {/* resume. */}
         <video
           ref={videoRef}
           autoPlay
@@ -970,6 +1100,44 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
           </div>
         ) : null}
 
+        {/* UX-2 — rest screen between sets. Camera stream stays alive behind */}
+        {/* this panel; counting is paused until the patient taps to continue. */}
+        {phase === 'resting' ? (
+          <div
+            data-testid="rest-screen"
+            className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-5 bg-black/80 px-6 text-center"
+          >
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#34C759]/20 text-[#34C759]">
+              <CheckCircle2 size={40} strokeWidth={2.2} aria-hidden />
+            </div>
+            <div>
+              <p className="text-[22px] font-semibold">
+                Serie {currentSet} de {sets} completada
+              </p>
+              <p className="mt-2 text-[15px] text-white/70">
+                Descansa un momento. Cuando estés listo, sigue con la siguiente
+                serie.
+              </p>
+            </div>
+            <button
+              type="button"
+              data-testid="start-next-set"
+              onClick={resumeSet}
+              className="mt-2 flex h-14 w-full max-w-[320px] items-center justify-center rounded-2xl bg-[#007AFF] text-[18px] font-semibold text-white active:bg-[#005BB5]"
+            >
+              Empezar serie {currentSet + 1}
+            </button>
+            <button
+              type="button"
+              data-testid="end-session"
+              onClick={handleEnd}
+              className="text-[15px] font-medium text-white/70 underline-offset-2 active:underline"
+            >
+              Terminar ahora
+            </button>
+          </div>
+        ) : null}
+
         {/* HUD — only while running. */}
         <div
           className={`relative z-10 flex h-screen flex-col ${
@@ -986,14 +1154,30 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
             {/* own row so the wide angle HUD below can never push Terminar */}
             {/* off-screen (BUG-2: it was overflowing the right edge at 390px). */}
             <div className="flex items-start justify-between gap-3">
+              {/* UX-2 — counter is PER SET ("Rep X de 20"), with a secondary */}
+              {/* "Serie n de N" so the patient never sees a scary "1/100". */}
               <div className="rounded-2xl bg-black/50 px-4 py-3 backdrop-blur">
                 <div className="text-[12px] uppercase tracking-wider text-white/70">
-                  Repeticiones
+                  Repetición
                 </div>
                 <div className="mt-0.5 text-[28px] font-semibold leading-none">
                   <span data-testid="rep-counter">{repCount}</span>
-                  <span className="text-white/60"> / {targetReps}</span>
+                  <span className="text-white/60"> de {repsPerSet}</span>
                 </div>
+                <div
+                  data-testid="set-counter"
+                  className="mt-1 text-[13px] font-medium text-white/80"
+                >
+                  Serie {currentSet} de {sets}
+                </div>
+                {driverFingerLabel ? (
+                  <div
+                    data-testid="measuring-finger"
+                    className="mt-1 text-[12px] text-[#FF9F0A]"
+                  >
+                    Midiendo: {driverFingerLabel}
+                  </div>
+                ) : null}
               </div>
 
               <button

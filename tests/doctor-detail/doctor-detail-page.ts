@@ -35,6 +35,16 @@ export class DoctorDetailPage extends BasePage {
     return this.page.getByRole('button', { name: 'Finalizar rehabilitación' });
   }
 
+  /** UX-4 — operated-finger badge in the header ("Dedo: Meñique"). */
+  injuredFingerBadge(): Locator {
+    return this.page.getByTestId('injured-finger-badge');
+  }
+
+  /** UX-4 — inline select that PATCHes the operated finger. */
+  injuredFingerSelect(): Locator {
+    return this.page.getByTestId('injured-finger-select');
+  }
+
   async expectLoaded(externalId: string): Promise<void> {
     await expect(this.heading(externalId)).toBeVisible();
     await expect(this.accessSection()).toBeVisible();

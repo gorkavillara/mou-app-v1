@@ -100,6 +100,12 @@ test.describe('Patient flow @patient', () => {
       await expect(anonPage.getByTestId('prescriptions-list')).toBeVisible();
       await expect(anonPage.getByText(/Empezar/)).toBeVisible();
 
+      // UX-1 — the prescription card spells the dose out in full (sets=2,
+      // reps=5, sessions=4 → "2 series de 5 repeticiones, 4 veces al día").
+      await expect(
+        anonPage.getByText('2 series de 5 repeticiones, 4 veces al día'),
+      ).toBeVisible();
+
       await anon.snap(testInfo, 'patient-home');
 
       // 5. Tap the first "Empezar" → intro of the exercise.
@@ -107,9 +113,10 @@ test.describe('Patient flow @patient', () => {
       await startBtn.click();
 
       await expect(anonPage.getByTestId('start-exercise')).toBeVisible();
-      await expect(
-        anonPage.getByText(/repeticiones de/i).first(),
-      ).toBeVisible();
+      // UX-1/UX-2 — intro spells the dose out as the prominent sentence.
+      await expect(anonPage.getByTestId('dose-sentence')).toHaveText(
+        '2 series de 5 repeticiones, 4 veces al día',
+      );
 
       await anon.snap(testInfo, 'patient-exercise-intro');
 

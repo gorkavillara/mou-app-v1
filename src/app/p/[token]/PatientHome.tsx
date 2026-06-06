@@ -40,6 +40,23 @@ function formatToday(d = new Date()): string {
   return `${dayName.charAt(0).toUpperCase() + dayName.slice(1)} ${d.getDate()} de ${month}`;
 }
 
+/**
+ * UX-1 (surgeon, 2026-05-20): "MUCHOS SON MUY CORTOS!!!" — the patient-facing
+ * dose must be spelled out in full ("3 series de 20 repeticiones, 4 veces al
+ * día") rather than a raw total like "100 repeticiones". Singular/plural is
+ * handled per quantity so "1 serie de 1 repetición, 1 vez al día" reads right.
+ */
+export function spellOutDose(
+  sets: number,
+  repsPerSet: number,
+  sessionsPerDay: number,
+): string {
+  const seriesWord = sets === 1 ? 'serie' : 'series';
+  const repWord = repsPerSet === 1 ? 'repetición' : 'repeticiones';
+  const timesWord = sessionsPerDay === 1 ? 'vez al día' : 'veces al día';
+  return `${sets} ${seriesWord} de ${repsPerSet} ${repWord}, ${sessionsPerDay} ${timesWord}`;
+}
+
 export function PatientHome({ token, patient, prescriptions, today }: Props) {
   const completed = today.sessions_completed;
   const target = today.sessions_target;
@@ -85,7 +102,7 @@ export function PatientHome({ token, patient, prescriptions, today }: Props) {
             </div>
           ) : (
             prescriptions.map((p) => {
-              const reps = p.sets * p.reps_per_set;
+              const doseText = spellOutDose(p.sets, p.reps_per_set, p.sessions_per_day);
               const exercise = p.exercise;
               return (
                 <article
@@ -98,8 +115,11 @@ export function PatientHome({ token, patient, prescriptions, today }: Props) {
                       <h2 className="text-[19px] font-semibold tracking-tight">
                         {exercise?.name ?? 'Ejercicio'}
                       </h2>
-                      <p className="mt-1 text-[13px] font-medium text-[#007AFF]">
-                        {reps} repeticiones
+                      <p
+                        className="mt-1 text-[14px] font-semibold text-[#007AFF]"
+                        data-testid={`dose-${p.id}`}
+                      >
+                        {doseText}
                       </p>
                     </div>
                     {exercise?.code ? (

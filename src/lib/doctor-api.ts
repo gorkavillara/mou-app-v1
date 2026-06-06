@@ -1,6 +1,6 @@
 import 'server-only';
 import { headers, cookies } from 'next/headers';
-import type { PathologyCode, TrackedJoint } from './database.types';
+import type { PathologyCode, TrackedJoint, InjuredFinger } from './database.types';
 
 /**
  * Doctor API client (server-side only).
@@ -37,6 +37,8 @@ export type PatientListItem = {
   id: string;
   external_id: string;
   pathology_code: PathologyCode | null;
+  // UX-4: operated finger (null = not specified).
+  injured_finger: InjuredFinger | null;
   started_at: string;
   discharged_at: string | null;
   // Backwards-compatible top-level fields (the list UI used these directly
@@ -104,6 +106,8 @@ export type PatientDetail = {
   id: string;
   external_id: string;
   pathology_code: PathologyCode | null;
+  // UX-4: operated finger (null = not specified).
+  injured_finger: InjuredFinger | null;
   access_token: string;
   started_at: string;
   discharged_at: string | null;

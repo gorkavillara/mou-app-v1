@@ -8,6 +8,7 @@
  */
 
 import type {
+  InjuredFinger,
   PathologyCode,
   QualityFlag,
   TargetFinger,
@@ -18,6 +19,8 @@ export type PatientPublic = {
   id: string;
   external_id: string;
   pathology_code: PathologyCode | null;
+  // UX-4: operated finger; drives the measurement and the orange overlay.
+  injured_finger: InjuredFinger | null;
   started_at: string;
   discharged_at: string | null;
 };

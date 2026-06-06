@@ -20,6 +20,7 @@ import {
 } from '@/lib/doctor-api';
 import { AdherenceBar } from '@/components/doctor/AdherenceBar';
 import { DischargeButton } from '@/components/doctor/DischargeButton';
+import { InjuredFingerControl } from '@/components/doctor/InjuredFingerControl';
 import { NewPrescriptionDialog } from '@/components/doctor/NewPrescriptionDialog';
 import { CopyUrlButton, PrintButton } from '@/components/doctor/PatientAccessActions';
 import { PrintableQRSheet } from '@/components/doctor/PrintableQRSheet';
@@ -66,6 +67,7 @@ export default async function PatientDetailPage({ params }: { params: Params }) 
           days={days}
           discharged={discharged}
           patientId={patient.id}
+          injuredFinger={patient.injured_finger}
         />
 
         <AccessSection patient={patient} accessUrl={accessUrl} />
@@ -109,11 +111,13 @@ function Header({
   days,
   discharged,
   patientId,
+  injuredFinger,
 }: {
   externalId: string;
   days: number;
   discharged: boolean;
   patientId: string;
+  injuredFinger: PatientDetail['injured_finger'];
 }) {
   return (
     <header className="flex items-start justify-between gap-3 flex-wrap">
@@ -133,6 +137,10 @@ function Header({
         <p className="text-sm text-gray-500">
           {days === 0 ? 'alta hoy' : `día ${days} de tratamiento`}
         </p>
+        {/* UX-4 — operated finger: badge when set + inline select to change it. */}
+        <div className="pt-1">
+          <InjuredFingerControl patientId={patientId} injuredFinger={injuredFinger} />
+        </div>
       </div>
 
       <DischargeButton
