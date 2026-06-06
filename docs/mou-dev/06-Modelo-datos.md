@@ -37,6 +37,7 @@ Seed inicial: 2 filas (los 2 ejercicios de la D4).
 | `doctor_id` | uuid FK→doctors | |
 | `external_id` | text | Nº historia clínica O correlativo. Único por doctor. |
 | `pathology_code` | text | Opcional: `flexor`, `extensor`, `otros`. **No** descripciones libres. |
+| `injured_finger` | text NULL | **UX-4 (2026-05-20)**: dedo operado: `pulgar`, `indice`, `medio`, `anular`, `menique`. NULL = no especificado → la sesión mide la media de todos los dedos (comportamiento actual). Valores idénticos a `FingerName` en `src/lib/hand-tracking.ts`. La sesión del paciente lo usa para (a) pintar ese dedo distinto y (b) medir los grados de ESE dedo en vez de la media. |
 | `access_token` | text UNIQUE | Token largo aleatorio para la URL del paciente |
 | `started_at` | date | Fecha de alta del tratamiento |
 | `discharged_at` | date NULL | Si NULL → activo. Si fecha → dado de alta. |

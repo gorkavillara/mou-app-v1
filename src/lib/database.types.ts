@@ -8,6 +8,8 @@ export type Json =
 
 export type PathologyCode = 'flexor' | 'extensor' | 'otros';
 export type TargetFinger = 'thumb' | 'index' | 'middle' | 'ring' | 'pinky' | 'all';
+// UX-4: operated finger. Identical to FingerName in src/lib/hand-tracking.ts.
+export type InjuredFinger = 'pulgar' | 'indice' | 'medio' | 'anular' | 'menique';
 export type TrackedJoint = 'wrist' | 'MCP' | 'PIP' | 'DIP';
 export type QualityFlag = 'clean' | 'low_visibility' | 'low_confidence' | 'partial';
 
@@ -54,6 +56,7 @@ export interface Database {
           doctor_id: string;
           external_id: string;
           pathology_code: PathologyCode | null;
+          injured_finger: InjuredFinger | null;
           access_token: string;
           started_at: string;
           discharged_at: string | null;
@@ -65,6 +68,7 @@ export interface Database {
           doctor_id: string;
           external_id: string;
           pathology_code?: PathologyCode | null;
+          injured_finger?: InjuredFinger | null;
           access_token?: string;
           started_at?: string;
           discharged_at?: string | null;

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { ZodError } from 'zod';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { errorResponse } from '@/lib/api/errors';
+import { patchPatientSchema } from '@/lib/validation/patients';
+import { errorResponse, zodErrorResponse } from '@/lib/api/errors';
 
 /**
  * B-08 — GET /api/doctor/patients/:id
@@ -26,7 +28,7 @@ export async function GET(
   const { data: patient, error: patientErr } = await supabase
     .from('patients')
     .select(
-      'id, external_id, pathology_code, access_token, started_at, discharged_at, created_at, updated_at',
+      'id, external_id, pathology_code, injured_finger, access_token, started_at, discharged_at, created_at, updated_at',
     )
     .eq('id', id)
     .maybeSingle();
@@ -113,4 +115,56 @@ export async function GET(
     sessions: sessionsRes.data ?? [],
     adherence,
   });
+}
+
+/**
+ * UX-4 — PATCH /api/doctor/patients/:id
+ *
+ * Updates the patient's `injured_finger`. Body: { injured_finger: <finger> | null }
+ * (null clears it → NULL = measure the all-fingers average). Strict Zod, exactly
+ * this one field for now. RLS filters by doctor_id; an empty update result is
+ * translated into 404 (patient not visible to this doctor).
+ *
+ * Next.js 16: dynamic route params are async (Promise<{ id: string }>).
+ */
+export async function PATCH(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> },
+) {
+  const { id } = await context.params;
+
+  let payload: unknown;
+  try {
+    payload = await request.json();
+  } catch {
+    return errorResponse('invalid_json', 400, 'Body must be valid JSON');
+  }
+
+  let body;
+  try {
+    body = patchPatientSchema.parse(payload);
+  } catch (err) {
+    if (err instanceof ZodError) return zodErrorResponse(err);
+    throw err;
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return errorResponse('unauthenticated', 401);
+
+  const { data: patient, error } = await supabase
+    .from('patients')
+    .update({ injured_finger: body.injured_finger })
+    .eq('id', id)
+    .select(
+      'id, external_id, pathology_code, injured_finger, access_token, started_at, discharged_at, created_at, updated_at',
+    )
+    .maybeSingle();
+
+  if (error) return errorResponse('db_error', 500, error.message);
+  if (!patient) return errorResponse('not_found', 404);
+
+  return NextResponse.json({ patient });
 }

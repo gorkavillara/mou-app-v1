@@ -89,6 +89,7 @@ vi.mock('qrcode', () => ({
 
 // Import routes AFTER the mock is registered.
 import { POST as createPatient, GET as listPatients } from '@/app/api/doctor/patients/route';
+import { PATCH as patchPatient } from '@/app/api/doctor/patients/[id]/route';
 import { POST as createPrescription } from '@/app/api/doctor/patients/[id]/prescriptions/route';
 import { POST as dischargePatient } from '@/app/api/doctor/patients/[id]/discharge/route';
 import { GET as getPatientQr } from '@/app/api/doctor/patients/[id]/qr.png/route';
@@ -151,6 +152,92 @@ describe('POST /api/doctor/patients (B-06)', () => {
     const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {});
     const res = await createPatient(req);
     expect(res.status).toBe(400);
+  });
+
+  it('201 persists injured_finger (UX-4)', async () => {
+    handlers['patients:insert'] = [
+      ({ args }) => {
+        const row = (args[0] ?? {}) as { injured_finger?: string | null };
+        expect(row.injured_finger).toBe('menique');
+        return {
+          data: {
+            id: 'p1',
+            doctor_id: authUser!.id,
+            external_id: 'HC-002',
+            pathology_code: 'flexor',
+            injured_finger: 'menique',
+            access_token: 'tok-xyz',
+            started_at: '2026-05-20',
+            discharged_at: null,
+            created_at: '2026-05-20T10:00:00Z',
+            updated_at: '2026-05-20T10:00:00Z',
+          },
+          error: null,
+        };
+      },
+    ];
+
+    const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
+      external_id: 'HC-002',
+      pathology_code: 'flexor',
+      injured_finger: 'menique',
+    });
+    const res = await createPatient(req);
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.patient.injured_finger).toBe('menique');
+  });
+
+  it('400 when injured_finger is invalid (UX-4)', async () => {
+    const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
+      external_id: 'HC-003',
+      injured_finger: 'pinky', // English — not a valid FingerName
+    });
+    const res = await createPatient(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('invalid_body');
+  });
+
+  it('201 accepts external_id with single spaces — "PRUEBA 1" (UX-6)', async () => {
+    handlers['patients:insert'] = [
+      ({ args }) => {
+        const row = (args[0] ?? {}) as { external_id?: string };
+        expect(row.external_id).toBe('PRUEBA 1');
+        return {
+          data: {
+            id: 'p2',
+            doctor_id: authUser!.id,
+            external_id: 'PRUEBA 1',
+            pathology_code: null,
+            injured_finger: null,
+            access_token: 'tok-prueba',
+            started_at: '2026-05-20',
+            discharged_at: null,
+            created_at: '2026-05-20T10:00:00Z',
+            updated_at: '2026-05-20T10:00:00Z',
+          },
+          error: null,
+        };
+      },
+    ];
+    const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
+      external_id: 'PRUEBA 1',
+    });
+    const res = await createPatient(req);
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.patient.external_id).toBe('PRUEBA 1');
+  });
+
+  it('400 on leading/trailing space in external_id (UX-6)', async () => {
+    for (const bad of ['  X', 'X ', 'A  B']) {
+      const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
+        external_id: bad,
+      });
+      const res = await createPatient(req);
+      expect(res.status).toBe(400);
+    }
   });
 
   it('409 on duplicate external_id (Postgres 23505)', async () => {
@@ -408,6 +495,105 @@ describe('POST /api/doctor/patients/:id/discharge (B-10)', () => {
       params: Promise.resolve({ id: 'p1' }),
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe('PATCH /api/doctor/patients/:id (UX-4)', () => {
+  it('sets injured_finger (200 + updated patient)', async () => {
+    handlers['patients:update'] = [
+      ({ args }) => {
+        const row = (args[0] ?? {}) as { injured_finger?: string | null };
+        expect(row.injured_finger).toBe('anular');
+        return {
+          data: {
+            id: 'p1',
+            external_id: 'HC-001',
+            pathology_code: 'flexor',
+            injured_finger: 'anular',
+            access_token: 'tok-abc',
+            started_at: '2026-05-01',
+            discharged_at: null,
+            created_at: '2026-05-01T10:00:00Z',
+            updated_at: '2026-05-20T10:00:00Z',
+          },
+          error: null,
+        };
+      },
+    ];
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      { injured_finger: 'anular' },
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.patient.injured_finger).toBe('anular');
+  });
+
+  it('clears injured_finger when null (200)', async () => {
+    handlers['patients:update'] = [
+      ({ args }) => {
+        const row = (args[0] ?? {}) as { injured_finger?: string | null };
+        expect(row.injured_finger).toBeNull();
+        return {
+          data: {
+            id: 'p1',
+            external_id: 'HC-001',
+            pathology_code: 'flexor',
+            injured_finger: null,
+            access_token: 'tok-abc',
+            started_at: '2026-05-01',
+            discharged_at: null,
+            created_at: '2026-05-01T10:00:00Z',
+            updated_at: '2026-05-20T10:00:00Z',
+          },
+          error: null,
+        };
+      },
+    ];
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      { injured_finger: null },
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.patient.injured_finger).toBeNull();
+  });
+
+  it('404 when patient not visible', async () => {
+    handlers['patients:update'] = [() => ({ data: null, error: null })];
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      { injured_finger: 'pulgar' },
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(404);
+  });
+
+  it('400 on extra fields (strict schema)', async () => {
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      { injured_finger: 'pulgar', name: 'Juan' },
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('invalid_body');
+  });
+
+  it('400 on invalid finger value', async () => {
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      { injured_finger: 'thumb' },
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(400);
   });
 });
 

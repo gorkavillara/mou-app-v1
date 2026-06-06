@@ -81,7 +81,7 @@ export async function GET(
   const { data: patient, error: patientErr } = await admin
     .from('patients')
     .select(
-      'id, external_id, pathology_code, started_at, discharged_at',
+      'id, external_id, pathology_code, injured_finger, started_at, discharged_at',
     )
     .eq('access_token', parsed.data)
     .maybeSingle();
@@ -157,6 +157,9 @@ export async function GET(
         id: patient.id,
         external_id: patient.external_id,
         pathology_code: patient.pathology_code,
+        // UX-4: drives the angle measurement (the session uses this finger as
+        // measurement driver instead of the all-fingers average).
+        injured_finger: patient.injured_finger,
         started_at: patient.started_at,
         discharged_at: patient.discharged_at,
       },

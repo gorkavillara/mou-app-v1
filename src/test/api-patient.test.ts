@@ -111,6 +111,7 @@ describe('GET /api/patient/[token] (B-11)', () => {
           id: 'p1',
           external_id: 'HC-001',
           pathology_code: 'flexor',
+          injured_finger: 'menique',
           started_at: '2026-05-01',
           discharged_at: null,
         },
@@ -156,6 +157,8 @@ describe('GET /api/patient/[token] (B-11)', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.patient.id).toBe('p1');
+    // UX-4: the session uses injured_finger as measurement driver.
+    expect(body.patient.injured_finger).toBe('menique');
     expect(body.prescriptions).toHaveLength(1);
     expect(body.prescriptions[0].exercise.code).toBe('flexion-pasiva-dedos');
     expect(body.today.sessions_target).toBe(4);

@@ -1,23 +1,68 @@
 import { z } from 'zod';
 
 /**
+ * UX-4 (2026-05-20): the operated finger. Values match the `FingerName` type
+ * in src/lib/hand-tracking.ts EXACTLY (Spanish, identical strings) and the DB
+ * CHECK constraint in 20260520120000_injured_finger.sql.
+ */
+export const injuredFingerSchema = z.enum([
+  'pulgar',
+  'indice',
+  'medio',
+  'anular',
+  'menique',
+]);
+
+export type InjuredFinger = z.infer<typeof injuredFingerSchema>;
+
+/**
+ * UX-6 (2026-05-20): the surgeon tried "PRUEBA 1" and it was rejected. We allow
+ * single spaces BETWEEN words (no leading/trailing spaces, no double spaces).
+ * Allowed token chars stay conservative: letters, digits, `_`, `-`, `/`.
+ */
+const externalIdSchema = z
+  .string()
+  .min(1, { error: 'external_id required' })
+  .max(64, { error: 'external_id too long' })
+  .regex(/^[A-Za-z0-9_\-/]+( [A-Za-z0-9_\-/]+)*$/, {
+    error:
+      'external_id may contain letters, digits, _ - / and single spaces between words',
+  });
+
+/**
  * Body schema for POST /api/doctor/patients (B-06).
  *
  * D3 (anonymous patients): no name/email/phone/dob ever. We use `.strict()`
  * so that any extra field — including PII fields someone might add by accident —
  * causes a validation error. Defense in depth: the DB also lacks those columns.
+ *
+ * UX-4: `injured_finger` is optional on create; absence is fine. We do NOT
+ * accept `null` here (just omit it) — clearing happens via PATCH.
  */
 export const createPatientSchema = z
   .object({
-    external_id: z
-      .string()
-      .min(1, { error: 'external_id required' })
-      .max(64, { error: 'external_id too long' }),
+    external_id: externalIdSchema,
     pathology_code: z.enum(['flexor', 'extensor', 'otros']).optional(),
+    injured_finger: injuredFingerSchema.optional(),
   })
   .strict();
 
 export type CreatePatientInput = z.infer<typeof createPatientSchema>;
+
+/**
+ * Body schema for PATCH /api/doctor/patients/:id (UX-4).
+ *
+ * Exactly one field for now: `injured_finger`. `null` clears it (NULL =
+ * measure the all-fingers average, current behaviour). `.strict()` rejects any
+ * other field, including PII (D3).
+ */
+export const patchPatientSchema = z
+  .object({
+    injured_finger: injuredFingerSchema.nullable(),
+  })
+  .strict();
+
+export type PatchPatientInput = z.infer<typeof patchPatientSchema>;
 
 /**
  * Query schema for GET /api/doctor/patients (B-07).
