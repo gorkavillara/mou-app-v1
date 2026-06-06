@@ -39,6 +39,9 @@ export type PatientListItem = {
   pathology_code: PathologyCode | null;
   // UX-4: operated finger (null = not specified).
   injured_finger: InjuredFinger | null;
+  // Round 3: intervention date (YYYY-MM-DD) + short surgical descriptor.
+  surgery_date: string | null;
+  surgery_note: string | null;
   started_at: string;
   discharged_at: string | null;
   // Backwards-compatible top-level fields (the list UI used these directly
@@ -108,6 +111,9 @@ export type PatientDetail = {
   pathology_code: PathologyCode | null;
   // UX-4: operated finger (null = not specified).
   injured_finger: InjuredFinger | null;
+  // Round 3: intervention date (YYYY-MM-DD) + short surgical descriptor.
+  surgery_date: string | null;
+  surgery_note: string | null;
   access_token: string;
   started_at: string;
   discharged_at: string | null;

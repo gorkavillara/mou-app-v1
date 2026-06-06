@@ -145,6 +145,48 @@ test.describe('Doctor patient detail', () => {
   );
 
   test(
+    'create with surgery date + note shows the IQ line and can be edited inline',
+    { tag: ['@high', '@e2e', '@doctor-detail', '@DOCTOR-DETAIL-E2E-006'] },
+    async ({ page }, testInfo) => {
+      const externalId = generatePatientId('SURGERY');
+      const list = new DoctorListPage(page);
+      await list.goto();
+      await list.newPatientButton.click();
+      const dialog = new NewPatientDialogPO(page);
+      await dialog.fillAndSubmit(externalId, undefined, undefined, {
+        date: '2026-05-19',
+        note: 'Tenorrafia FDP 5º dedo',
+      });
+      await page.waitForURL(/\/doctor\/pacientes\/[0-9a-f-]+/);
+
+      const detail = new DoctorDetailPage(page);
+      await detail.expectLoaded(externalId);
+
+      // Surgeon's exact target format: "IQ 19/5/26 · Tenorrafia FDP 5º dedo".
+      await expect(detail.surgeryLine()).toHaveText('IQ 19/5/26 · Tenorrafia FDP 5º dedo');
+      await detail.snap(testInfo, 'patient-detail-surgery');
+
+      // Edit the note inline → PATCH → persists across a reload.
+      await detail.surgeryEditButton().click();
+      await detail.surgeryNoteInput().fill('Tenorrafia FDP 4º dedo');
+      await detail.surgerySaveButton().click();
+      await expect(detail.surgeryLine()).toHaveText('IQ 19/5/26 · Tenorrafia FDP 4º dedo');
+
+      await page.reload();
+      await expect(detail.surgeryLine()).toHaveText('IQ 19/5/26 · Tenorrafia FDP 4º dedo');
+
+      // Clear the note → line drops to just the IQ date.
+      await detail.surgeryEditButton().click();
+      await detail.surgeryNoteInput().fill('');
+      await detail.surgerySaveButton().click();
+      await expect(detail.surgeryLine()).toHaveText('IQ 19/5/26');
+
+      await page.reload();
+      await expect(detail.surgeryLine()).toHaveText('IQ 19/5/26');
+    },
+  );
+
+  test(
     'discharge a patient hides the discharge button and toggles status',
     { tag: ['@high', '@e2e', '@doctor-detail', '@DOCTOR-DETAIL-E2E-003'] },
     async ({ page }, testInfo) => {

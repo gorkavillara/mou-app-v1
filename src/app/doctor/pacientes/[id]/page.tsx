@@ -21,6 +21,7 @@ import {
 import { AdherenceBar } from '@/components/doctor/AdherenceBar';
 import { DischargeButton } from '@/components/doctor/DischargeButton';
 import { InjuredFingerControl } from '@/components/doctor/InjuredFingerControl';
+import { SurgeryControl } from '@/components/doctor/SurgeryControl';
 import { NewPrescriptionDialog } from '@/components/doctor/NewPrescriptionDialog';
 import { CopyUrlButton, PrintButton } from '@/components/doctor/PatientAccessActions';
 import { PrintableQRSheet } from '@/components/doctor/PrintableQRSheet';
@@ -68,6 +69,8 @@ export default async function PatientDetailPage({ params }: { params: Params }) 
           discharged={discharged}
           patientId={patient.id}
           injuredFinger={patient.injured_finger}
+          surgeryDate={patient.surgery_date}
+          surgeryNote={patient.surgery_note}
         />
 
         <AccessSection patient={patient} accessUrl={accessUrl} />
@@ -112,12 +115,16 @@ function Header({
   discharged,
   patientId,
   injuredFinger,
+  surgeryDate,
+  surgeryNote,
 }: {
   externalId: string;
   days: number;
   discharged: boolean;
   patientId: string;
   injuredFinger: PatientDetail['injured_finger'];
+  surgeryDate: PatientDetail['surgery_date'];
+  surgeryNote: PatientDetail['surgery_note'];
 }) {
   return (
     <header className="flex items-start justify-between gap-3 flex-wrap">
@@ -140,6 +147,14 @@ function Header({
         {/* UX-4 — operated finger: badge when set + inline select to change it. */}
         <div className="pt-1">
           <InjuredFingerControl patientId={patientId} injuredFinger={injuredFinger} />
+        </div>
+        {/* Round 3 — intervention date + surgical descriptor (display + inline edit). */}
+        <div className="pt-1">
+          <SurgeryControl
+            patientId={patientId}
+            surgeryDate={surgeryDate}
+            surgeryNote={surgeryNote}
+          />
         </div>
       </div>
 

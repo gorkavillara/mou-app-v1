@@ -28,7 +28,7 @@ export class DoctorDetailPage extends BasePage {
   }
 
   newPrescriptionButton(): Locator {
-    return this.page.getByRole('button', { name: /Añadir|Nueva prescripción/i });
+    return this.page.getByRole('button', { name: /Añadir ejercicio|Nueva prescripción/i });
   }
 
   dischargeButton(): Locator {
@@ -43,6 +43,28 @@ export class DoctorDetailPage extends BasePage {
   /** UX-4 — inline select that PATCHes the operated finger. */
   injuredFingerSelect(): Locator {
     return this.page.getByTestId('injured-finger-select');
+  }
+
+  /** Round 3 — compact "IQ d/M/yy · nota" line in the header (when set). */
+  surgeryLine(): Locator {
+    return this.page.getByTestId('surgery-line');
+  }
+
+  /** Round 3 — pencil affordance opening the inline surgery editor. */
+  surgeryEditButton(): Locator {
+    return this.page.getByTestId('surgery-edit');
+  }
+
+  surgeryDateInput(): Locator {
+    return this.page.getByTestId('surgery-date-input');
+  }
+
+  surgeryNoteInput(): Locator {
+    return this.page.getByTestId('surgery-note-input');
+  }
+
+  surgerySaveButton(): Locator {
+    return this.page.getByTestId('surgery-save');
   }
 
   async expectLoaded(externalId: string): Promise<void> {

@@ -31,6 +31,9 @@ export function NewPatientDialog({ open, onClose }: Props) {
   const [externalId, setExternalId] = useState('');
   const [pathology, setPathology] = useState<'' | 'flexor' | 'extensor' | 'otros'>('');
   const [injuredFinger, setInjuredFinger] = useState<'' | InjuredFinger>('');
+  // Round 3: intervention date + short surgical descriptor (both optional).
+  const [surgeryDate, setSurgeryDate] = useState('');
+  const [surgeryNote, setSurgeryNote] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -49,6 +52,8 @@ export function NewPatientDialog({ open, onClose }: Props) {
     setExternalId('');
     setPathology('');
     setInjuredFinger('');
+    setSurgeryDate('');
+    setSurgeryNote('');
     setError(null);
     setSubmitting(false);
   }
@@ -78,12 +83,18 @@ export function NewPatientDialog({ open, onClose }: Props) {
         external_id: string;
         pathology_code?: 'flexor' | 'extensor' | 'otros';
         injured_finger?: InjuredFinger;
+        surgery_date?: string;
+        surgery_note?: string;
       } = {
         external_id: id,
       };
       if (pathology) body.pathology_code = pathology;
       // UX-4: only include when explicitly chosen (never send null on create).
       if (injuredFinger) body.injured_finger = injuredFinger;
+      // Round 3: include only when filled (date non-empty; note trimmed non-empty).
+      if (surgeryDate) body.surgery_date = surgeryDate;
+      const note = surgeryNote.trim();
+      if (note) body.surgery_note = note;
 
       const res = await fetch('/api/doctor/patients', {
         method: 'POST',
@@ -194,6 +205,38 @@ export function NewPatientDialog({ open, onClose }: Props) {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="surgery_date" className="block text-[13px] font-medium text-gray-500 ml-1">
+              Fecha de intervención (opcional)
+            </label>
+            <input
+              id="surgery_date"
+              type="date"
+              value={surgeryDate}
+              onChange={(e) => setSurgeryDate(e.target.value)}
+              className="w-full h-11 px-4 bg-white border border-[#E5E5EA] rounded-[10px] text-[17px] text-gray-900 placeholder-[#C7C7CC] focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF] focus:outline-none"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="surgery_note" className="block text-[13px] font-medium text-gray-500 ml-1">
+              Cirugía (opcional)
+            </label>
+            <input
+              id="surgery_note"
+              type="text"
+              autoComplete="off"
+              maxLength={120}
+              placeholder="Tenorrafia FDP 5º dedo"
+              value={surgeryNote}
+              onChange={(e) => setSurgeryNote(e.target.value)}
+              className="w-full h-11 px-4 bg-white border border-[#E5E5EA] rounded-[10px] text-[17px] text-gray-900 placeholder-[#C7C7CC] focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF] focus:outline-none"
+            />
+            <p className="text-xs text-gray-500 ml-1">
+              Solo descripción clínica. Nunca incluyas el nombre del paciente.
+            </p>
           </div>
 
           {error && (

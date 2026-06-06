@@ -42,6 +42,8 @@ export class NewPatientDialogPO {
   readonly externalIdInput: Locator;
   readonly pathologySelect: Locator;
   readonly injuredFingerSelect: Locator;
+  readonly surgeryDateInput: Locator;
+  readonly surgeryNoteInput: Locator;
   readonly submitButton: Locator;
   readonly errorBox: Locator;
 
@@ -50,6 +52,8 @@ export class NewPatientDialogPO {
     this.externalIdInput = page.getByLabel('ID del paciente');
     this.pathologySelect = page.getByLabel(/Patolog/i);
     this.injuredFingerSelect = page.getByLabel(/Dedo lesionado/i);
+    this.surgeryDateInput = page.getByLabel(/Fecha de intervención/i);
+    this.surgeryNoteInput = page.getByLabel(/^Cirugía/i);
     this.submitButton = page.getByRole('button', { name: /Crear paciente/i });
     this.errorBox = this.dialog.locator('div.bg-red-50');
   }
@@ -58,10 +62,13 @@ export class NewPatientDialogPO {
     externalId: string,
     pathology?: 'flexor' | 'extensor' | 'otros',
     injuredFinger?: InjuredFingerValue,
+    surgery?: { date?: string; note?: string },
   ): Promise<void> {
     await this.externalIdInput.fill(externalId);
     if (pathology) await this.pathologySelect.selectOption(pathology);
     if (injuredFinger) await this.injuredFingerSelect.selectOption(injuredFinger);
+    if (surgery?.date) await this.surgeryDateInput.fill(surgery.date);
+    if (surgery?.note) await this.surgeryNoteInput.fill(surgery.note);
     await this.submitButton.click();
   }
 }
