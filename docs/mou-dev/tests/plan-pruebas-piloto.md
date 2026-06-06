@@ -39,7 +39,7 @@ Checklist técnico. Cuando esté todo ✅, avisa a Javi de que puede empezar la 
 
 ---
 
-# 🧑‍⚕️ FASE 1 — Javi (Valencia) · el panel del doctor
+# 🧑‍⚕️ FASE 1 — Javi · el panel del doctor
 
 > No necesitas saber nada técnico. Solo un navegador (Chrome) en el ordenador. Vas a hacer de ti mismo: el cirujano que da de alta a un paciente.
 
@@ -102,7 +102,7 @@ Checklist técnico. Cuando esté todo ✅, avisa a Javi de que puede empezar la 
 
 ---
 
-# 📱 FASE 2 — Javi (Valencia) · ponte tú de "paciente"
+# 📱 FASE 2 — Javi · ponte tú de "paciente"
 
 > Ahora haces de paciente: vas a usar el móvil como lo haría alguien al que acabas de operar.
 

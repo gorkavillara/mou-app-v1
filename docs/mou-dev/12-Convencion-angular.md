@@ -30,16 +30,20 @@ Para cada articulación medible, fijamos:
 ### PIP (interfalángica proximal) — articulación media
 - **0°**: Falange media en línea con proximal.
 - **Flexión completa**: ~**100°** (rango clínico mayor que MCP).
-- **Extensión**: 0° (no hiperextiende sano).
+- **Extensión / hiperextensión**: hasta **−30°** (BUG-4, feedback 2026-05-20).
 - **Vector A**: MCP → PIP.
 - **Vector B**: PIP → DIP.
+- **Convención de signo**: positivo = flexión, negativo = extensión/hiperextensión (mismo cross-product 2D que MCP).
 
 ### DIP (interfalángica distal) — punta
 - **0°**: Falange distal en línea con media.
 - **Flexión completa**: ~**80°**.
-- **Extensión**: 0°.
+- **Extensión / hiperextensión**: hasta **−30°** (BUG-4, feedback 2026-05-20).
 - **Vector A**: PIP → DIP.
 - **Vector B**: DIP → TIP.
+- **Convención de signo**: positivo = flexión, negativo = extensión/hiperextensión.
+
+> **Nota 2026-05-20 (BUG-4):** Javi opera tendones extensores y reportó *"NO MARCA LA EXTENSIÓN DE LAS INTERFALÁNGICAS"*. Hasta esa fecha PIP/DIP devolvían solo magnitud (≥ 0) y `clinicalMin` no existía, así que el déficit de extensión (dedo que no llega a 0°) y la hiperextensión leve se aplanaban a 0. Ahora PIP/DIP llevan signo y tienen `clinicalMin: -30`, de modo que la región negativa se resuelve en lugar de descartarse. El valor −30° es provisional, pendiente de goniómetro con Javi.
 
 ### Pulgar (out of scope Fase 1)
 El pulgar tiene cinemática distinta (oposición, abducción, MCP+IP solo). Lo dejamos fuera de las prescripciones iniciales hasta que un caso real lo justifique.
@@ -49,9 +53,9 @@ El pulgar tiene cinemática distinta (oposición, abducción, MCP+IP solo). Lo d
 | Articulación | 0° clínico | Tope clínico | Medido empírico (TBD) | Hiperext. |
 |---|---|---|---|---|
 | wrist | mano recta | +90° flex / −70° ext | _pendiente_ | sí |
-| MCP (índice/medio/anular/meñique) | dedo recto | 90° | _pendiente_ | leve |
-| PIP | falange media recta | 100° | _pendiente_ | no |
-| DIP | falange distal recta | 80° | _pendiente_ | no |
+| MCP (índice/medio/anular/meñique) | dedo recto | 90° / −30° ext | _pendiente_ | leve |
+| PIP | falange media recta | 100° / −30° ext | _pendiente_ | sí (−30°, BUG-4 2026-05-20) |
+| DIP | falange distal recta | 80° / −30° ext | _pendiente_ | sí (−30°, BUG-4 2026-05-20) |
 
 > Los valores **medido empírico** se rellenan en sesión presencial con Javi + goniómetro + la herramienta `/dev/calibration` (IA-04). No usar la app en producción hasta que esta tabla esté completa.
 

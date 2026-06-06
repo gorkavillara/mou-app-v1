@@ -1,12 +1,13 @@
 ---
+
 kanban-plugin: board
 mou-board-version: 1
+
 ---
 
 ## 📥 Backlog
 
 - [ ] **B-17** [P1] Documento legal para director médico (Gorka) #backend
-- [ ] **F-15** [P2] Modo oscuro completo en panel doctor #frontend
 - [ ] **IA-08** [P1] Indicador en vivo de ángulo durante ejercicio (cubierto por F-13) #ia
 - [ ] **IA-10** [P2] Estimación de calidad de movimiento (velocidad, suavidad) #ia
 - [ ] **IA-12** [P2] Modo "espejo" autovalidación #ia
@@ -16,16 +17,20 @@ mou-board-version: 1
 
 ## 🔧 En curso
 
-_(vacío)_
+- [ ] **F-15** [P2] Modo oscuro completo en panel doctor #frontend
 
 
 ## 🧪 En revisión
 
-_(vacío)_
 
 
 ## ✅ Hecho
 
+- [x] **BUG-1** [P0] Cámara en negro 1ª sesión: fase `preparing`, video pre-montado, getUserMedia+MediaPipe en paralelo, watchdog 4s + "Reintentar" ✓ 2026-05-20 #frontend
+- [x] **BUG-2** [P0] Botón "Terminar" bajo el notch: safe-area inset + HUD en 2 filas ✓ 2026-05-20 #frontend
+- [x] **BUG-3** [P1] Coaching no disparaba: `updateRepCoaching` estaba importado pero sin llamar — cableado al cierre de rep con warm-up 3 reps ✓ 2026-05-20 #frontend #ia
+- [x] **BUG-4** [P1] Extensión interfalángica: PIP/DIP con signo + `clinicalMin -30` + persistencia de `max_extension_deg` en negativo (coherente con B-14 `min()`) ✓ 2026-05-20 #ia
+- [x] **UX-3** [P0] Aviso "mano DE PERFIL" en intro y preparing ✓ 2026-05-20 #frontend
 - [x] **G-5** `/dev/calibration` gateada por `CALIBRATION_KEY` (no por NODE_ENV) → accesible en Vercel con `?key=`; review ✓ + tester ✓ ✓ 2026-05-11 #infra
 - [x] **FIX-1** Modal centrado: regla `dialog[open] { margin: auto }` global (Tailwind 4 preflight) + `m-auto` por dialog ✓ 2026-05-11 #frontend
 - [x] **FIX-2** `button { cursor: pointer }` globales en `@layer base` (Tailwind 4 los quitó por defecto) ✓ 2026-05-11 #frontend
@@ -86,17 +91,10 @@ _(vacío)_
 - [x] **OPS-Migrate** Migración Fase 1 aplicada en Supabase prod ✓ 2026-05-09 #infra
 
 
+
+
 %% kanban:settings
-{
-  "kanban-plugin": "board",
-  "show-checkboxes": true,
-  "lane-width": 320,
-  "tag-colors": [
-    { "tagKey": "#backend",  "color": "rgba(56, 189, 248, 0.18)" },
-    { "tagKey": "#frontend", "color": "rgba(248, 113, 113, 0.18)" },
-    { "tagKey": "#ia",       "color": "rgba(167, 139, 250, 0.18)" },
-    { "tagKey": "#infra",    "color": "rgba(110, 231, 183, 0.18)" }
-  ],
-  "show-relative-date": true
-}
+```
+{"kanban-plugin":"board","list-collapse":[null,null,false]}
+```
 %%
