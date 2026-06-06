@@ -752,9 +752,20 @@ function angleBetweenVectors(
 /**
  * Computes MCP, PIP and DIP angles for a single finger.
  *
- * - MCP: between wrist→MCP and MCP→PIP. Sign carries flexion (+) / hyperextension (−).
- * - PIP: between MCP→PIP and PIP→DIP. Always non-negative (PIP cannot hyperextend).
+ * All three joints carry a SIGN via the same 2D cross-product convention:
+ * positive = flexion, negative = extension/hyperextension.
+ *
+ * - MCP: between wrist→MCP and MCP→PIP.
+ * - PIP: between MCP→PIP and PIP→DIP.
  * - DIP: between PIP→DIP and DIP→TIP.
+ *
+ * BUG-4 (surgeon feedback 2026-05-20: "NO MARCA LA EXTENSIÓN DE LAS
+ * INTERFALÁNGICAS"): PIP and DIP previously returned magnitude only, so an
+ * extension deficit / mild hyperextension at the interphalangeals — exactly
+ * the clinical datum an extensor-tendon surgeon needs — collapsed to a
+ * positive number and then got clamped to 0 in normalization. They now carry
+ * the same flexion(+)/extension(−) sign as MCP so the negative region is
+ * resolvable downstream.
  *
  * Returned values are RAW measured degrees. Apply `normalizeJointAngle` to map
  * them to the clinical 0–90° (or 0–100/0–80) range.
@@ -773,15 +784,20 @@ export function calculateJointAngles(landmarks: Point[], finger: FingerConfig): 
   const mcpCross2D = a1x * b1y - a1y * b1x;
   const mcpAngle = mcpCross2D >= 0 ? mcpMag : -mcpMag;
 
-  // PIP: MCP→PIP versus PIP→DIP. Magnitude only.
+  // PIP: MCP→PIP versus PIP→DIP. Signed (see BUG-4 above) so extension
+  // deficit / hyperextension resolves as a negative value.
   const a2x = pip.x - mcp.x,   a2y = pip.y - mcp.y,   a2z = pip.z - mcp.z;
   const b2x = dip.x - pip.x,   b2y = dip.y - pip.y,   b2z = dip.z - pip.z;
-  const pipAngle = angleBetweenVectors(a2x, a2y, a2z, b2x, b2y, b2z);
+  const pipMag = angleBetweenVectors(a2x, a2y, a2z, b2x, b2y, b2z);
+  const pipCross2D = a2x * b2y - a2y * b2x;
+  const pipAngle = pipCross2D >= 0 ? pipMag : -pipMag;
 
-  // DIP: PIP→DIP versus DIP→TIP. Magnitude only.
+  // DIP: PIP→DIP versus DIP→TIP. Signed (see BUG-4 above).
   const a3x = dip.x - pip.x,   a3y = dip.y - pip.y,   a3z = dip.z - pip.z;
   const b3x = tip.x - dip.x,   b3y = tip.y - dip.y,   b3z = tip.z - dip.z;
-  const dipAngle = angleBetweenVectors(a3x, a3y, a3z, b3x, b3y, b3z);
+  const dipMag = angleBetweenVectors(a3x, a3y, a3z, b3x, b3y, b3z);
+  const dipCross2D = a3x * b3y - a3y * b3x;
+  const dipAngle = dipCross2D >= 0 ? dipMag : -dipMag;
 
   return { MCP: mcpAngle, PIP: pipAngle, DIP: dipAngle };
 }
@@ -839,8 +855,17 @@ export type JointCalibration = {
 export const JOINT_CALIBRATION: Record<JointName, JointCalibration> = {
   wrist: { measuredOpen: 15, measuredClosed: 95,  clinicalMax: 90, clinicalMin: -70 },
   MCP:   { measuredOpen: 12, measuredClosed: 100, clinicalMax: 90, clinicalMin: -30 },
-  PIP:   { measuredOpen: 10, measuredClosed: 110, clinicalMax: 100 },
-  DIP:   { measuredOpen: 8,  measuredClosed: 95,  clinicalMax: 80 },
+  // PIP/DIP clinicalMin (BUG-4, surgeon feedback 2026-05-20): a healthy PIP/DIP
+  // barely hyperextends, but post-op EXTENSOR-TENDON patients sit near or below
+  // 0° (extension deficit: finger stuck in flexion can't reach 0°; mild
+  // hyperextension also exists). Without a clinicalMin, normalizeJointAngle
+  // flattens that whole region to 0 and the surgeon sees nothing — which is
+  // exactly the "NO MARCA LA EXTENSIÓN DE LAS INTERFALÁNGICAS" complaint. A
+  // -30° bound makes normalization RESOLVE the negative region (same
+  // negative-slope two-segment mapping already used by wrist/MCP) instead of
+  // clamping it. Empirical value pending goniometer calibration with Javi.
+  PIP:   { measuredOpen: 10, measuredClosed: 110, clinicalMax: 100, clinicalMin: -30 },
+  DIP:   { measuredOpen: 8,  measuredClosed: 95,  clinicalMax: 80,  clinicalMin: -30 },
 };
 
 /**

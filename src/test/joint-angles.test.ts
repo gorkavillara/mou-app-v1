@@ -126,14 +126,83 @@ describe('normalizeJointAngle', () => {
     expect(normalizeJointAngle(0, 'MCP')).toBeCloseTo(0, 5);
   });
 
-  it('returns 0 for negative input on joints without hyperextension', () => {
-    expect(normalizeJointAngle(-30, 'PIP')).toBe(0);
-    expect(normalizeJointAngle(-30, 'DIP')).toBe(0);
+  // BUG-4 (2026-05-20): PIP/DIP now have a hyperextension/extension-deficit
+  // bound (clinicalMin: -30). This test used to assert PIP/DIP flatten negative
+  // input to 0; it was deliberately changed because the surgeon needs that
+  // negative region resolved, not discarded.
+  it('maps negative PIP/DIP input into the negative clinical range, not 0', () => {
+    const pip = normalizeJointAngle(-JOINT_CALIBRATION.PIP.measuredOpen, 'PIP');
+    const dip = normalizeJointAngle(-JOINT_CALIBRATION.DIP.measuredOpen, 'DIP');
+    expect(pip).toBeCloseTo(JOINT_CALIBRATION.PIP.clinicalMin!, 5); // -30
+    expect(dip).toBeCloseTo(JOINT_CALIBRATION.DIP.clinicalMin!, 5); // -30
+    // A partial extension deficit maps proportionally into the negative band.
+    const halfPip = normalizeJointAngle(-JOINT_CALIBRATION.PIP.measuredOpen / 2, 'PIP');
+    expect(halfPip).toBeLessThan(0);
+    expect(halfPip).toBeGreaterThan(JOINT_CALIBRATION.PIP.clinicalMin!);
   });
 
   it('maps -measuredOpen to clinicalMin for joints with hyperextension', () => {
     const cal = JOINT_CALIBRATION.wrist;
     expect(normalizeJointAngle(-cal.measuredOpen, 'wrist')).toBeCloseTo(cal.clinicalMin!, 5);
+  });
+});
+
+// BUG-4 (2026-05-20): the surgeon operates extensor tendons and reported that
+// interphalangeal EXTENSION was never measured. PIP/DIP previously returned
+// magnitude only (always ≥ 0), so flexion and extension were indistinguishable
+// and the negative region got clamped to 0. They must now carry a SIGN via the
+// same 2D cross-product convention as MCP: bending one way and the opposite way
+// produce opposite signs, and the extension side resolves through normalize.
+describe('calculateJointAngles — interphalangeal extension sign (BUG-4)', () => {
+  /** Index finger bent at the PIP toward +x (DIP/TIP curl forward). */
+  function indexBentForwardAtPIP(): Point[] {
+    const lms = straightHandLandmarks();
+    lms[5] = { x: 0, y: 2, z: 0 };   // MCP
+    lms[6] = { x: 0, y: 3, z: 0 };   // PIP
+    lms[7] = { x: 1, y: 3, z: 0 };   // DIP curls toward +x
+    lms[8] = { x: 2, y: 3, z: 0 };   // TIP continues
+    return lms;
+  }
+
+  /** Index finger bent at the PIP toward -x — the OPPOSITE direction. */
+  function indexBentBackwardAtPIP(): Point[] {
+    const lms = straightHandLandmarks();
+    lms[5] = { x: 0, y: 2, z: 0 };
+    lms[6] = { x: 0, y: 3, z: 0 };
+    lms[7] = { x: -1, y: 3, z: 0 };  // DIP curls toward -x
+    lms[8] = { x: -2, y: 3, z: 0 };
+    return lms;
+  }
+
+  it('produces OPPOSITE signs for the two bend directions (no longer magnitude-only)', () => {
+    const fwd = calculateJointAngles(indexBentForwardAtPIP(), indexFinger).PIP;
+    const back = calculateJointAngles(indexBentBackwardAtPIP(), indexFinger).PIP;
+    // Both ~90° in magnitude, but opposite sign — the whole point of BUG-4.
+    expect(Math.abs(Math.abs(fwd) - 90)).toBeLessThan(1);
+    expect(Math.abs(Math.abs(back) - 90)).toBeLessThan(1);
+    expect(Math.sign(fwd)).toBe(-Math.sign(back));
+  });
+
+  it('a finger bent BACKWARDS at the PIP (hyperextension) yields a NEGATIVE angle', () => {
+    // Whichever direction is "flexion", the opposite (extension) is negative.
+    // In this landmark frame the +x curl is the flexion side, so the -x curl
+    // is the extension/hyperextension side and must read negative.
+    const fwd = calculateJointAngles(indexBentForwardAtPIP(), indexFinger).PIP;
+    const back = calculateJointAngles(indexBentBackwardAtPIP(), indexFinger).PIP;
+    const flexion = fwd > 0 ? fwd : back;
+    const extension = fwd > 0 ? back : fwd;
+    expect(flexion).toBeGreaterThan(0);
+    expect(extension).toBeLessThan(0);
+  });
+
+  it('the extension-side PIP angle normalizes into the negative clinical range, not 0', () => {
+    const fwd = calculateJointAngles(indexBentForwardAtPIP(), indexFinger).PIP;
+    const back = calculateJointAngles(indexBentBackwardAtPIP(), indexFinger).PIP;
+    const extensionRaw = fwd < 0 ? fwd : back; // the negative one
+    expect(extensionRaw).toBeLessThan(0);
+    const norm = normalizeJointAngle(extensionRaw, 'PIP');
+    expect(norm).toBeLessThan(0);
+    expect(norm).toBeGreaterThanOrEqual(JOINT_CALIBRATION.PIP.clinicalMin!);
   });
 });
 

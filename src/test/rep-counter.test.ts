@@ -3,9 +3,12 @@ import {
   createJointRepCounter,
   updateJointRepCounter,
   classifyRepQuality,
+  createRepCoaching,
+  updateRepCoaching,
   type CompletedJointRep,
   type FrameQuality,
   type JointRepCounter,
+  type RepCoachingState,
 } from '@/lib/hand-tracking';
 
 /**
@@ -113,6 +116,27 @@ describe('updateJointRepCounter — rep counting', () => {
     expect(high).toBe(0);
   });
 
+  it('captures the per-joint EXTENSION peak, not just flexion (BUG-4)', () => {
+    // A rep driven by MCP flexion, but where PIP shows an extension deficit:
+    // the PIP normalized angle dips NEGATIVE during the rep. The counter must
+    // record that as peakExt, separately from peakFlex.
+    const series: Array<{ angle: number; joints: { MCP: number; PIP: number } }> = [];
+    for (let k = 0; k < 5; k++) series.push({ angle: 0, joints: { MCP: 0, PIP: 0 } });
+    const path = cycle(70);
+    for (const a of path) {
+      // MCP flexes positive; PIP rides negative (e.g. -20°) — extensor patient.
+      series.push({ angle: a, joints: { MCP: a, PIP: a > 5 ? -20 : 0 } });
+    }
+    for (let k = 0; k < 5; k++) series.push({ angle: 0, joints: { MCP: 0, PIP: 0 } });
+
+    const { reps } = drive(series);
+    expect(reps).toHaveLength(1);
+    const peaks = reps[0].peaks;
+    expect(peaks.MCP?.peakFlex).toBeGreaterThanOrEqual(65);
+    // The extension excursion at PIP is captured as peakExt (absolute value).
+    expect(peaks.PIP?.peakExt).toBe(20);
+  });
+
   it('captures quality breakdown on the completed rep', () => {
     const series: Array<{ angle: number; quality?: FrameQuality }> = [];
     for (let k = 0; k < 5; k++) series.push({ angle: 0, quality: { detected: true, handednessScore: 0.95 } });
@@ -205,5 +229,59 @@ describe('classifyRepQuality — flag heuristics', () => {
       handednessScore: 0.95,
     }));
     expect(classifyRepQuality(frames).flag).toBe('clean');
+  });
+});
+
+// BUG-3 (2026-05-20): surgeon did 3 weak reps and "NO SALE NADA DE AVISOS".
+// These tests prove the LIB state machine fires `push_more` exactly as IA-09
+// specifies, using the real call pattern ExerciseSession would use: feed each
+// completed rep's peak normalized MCP (clinical degrees) into updateRepCoaching.
+// Default threshold is 60° (half-flexion), consecutiveThreshold is 3.
+describe('updateRepCoaching — coaching state machine (BUG-3 lib half)', () => {
+  /** Feed a sequence of per-rep peak flexions; collect every suggestion emitted. */
+  function feed(peaks: number[], init?: Partial<RepCoachingState>) {
+    let state = createRepCoaching(init);
+    const suggestions: (string | null)[] = [];
+    for (const peakFlexion of peaks) {
+      const r = updateRepCoaching(state, { peakFlexion });
+      state = r.state;
+      suggestions.push(r.suggestion);
+    }
+    return { state, suggestions };
+  }
+
+  it('fires push_more on the 3rd consecutive weak rep (35° peaks, default 60° threshold)', () => {
+    const { suggestions } = feed([35, 35, 35]);
+    expect(suggestions).toEqual([null, null, 'push_more']);
+  });
+
+  it('also fires for ~30-40° peaks, the surgeon\'s "flojas" range', () => {
+    const { suggestions } = feed([40, 30, 38]);
+    expect(suggestions.filter((s) => s === 'push_more')).toHaveLength(1);
+    expect(suggestions[2]).toBe('push_more');
+  });
+
+  it('does NOT fire after only 2 weak reps', () => {
+    const { suggestions, state } = feed([35, 35]);
+    expect(suggestions.every((s) => s === null)).toBe(true);
+    expect(state.consecutiveLowReps).toBe(2);
+  });
+
+  it('a strong rep (>=60°) resets the consecutive-low counter', () => {
+    const { suggestions, state } = feed([35, 35, 80, 35]);
+    expect(suggestions.every((s) => s === null)).toBe(true);
+    expect(state.consecutiveLowReps).toBe(1);
+  });
+
+  it('resets after firing so it cannot spam back-to-back', () => {
+    // 6 weak reps → fires on #3 and again on #6, not on #4/#5.
+    const { suggestions } = feed([35, 35, 35, 35, 35, 35]);
+    expect(suggestions).toEqual([null, null, 'push_more', null, null, 'push_more']);
+  });
+
+  it('a peak exactly AT threshold is not low (strict <)', () => {
+    const { suggestions, state } = feed([60, 60, 60]);
+    expect(suggestions.every((s) => s === null)).toBe(true);
+    expect(state.consecutiveLowReps).toBe(0);
   });
 });
