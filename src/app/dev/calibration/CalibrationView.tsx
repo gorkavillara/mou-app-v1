@@ -100,13 +100,27 @@ function buildCalibrationJson(draft: CalibrationDraft): string {
   if (!draft.open || !draft.fist) {
     return '// Captura las dos referencias (mano abierta + puño) para generar el JSON.';
   }
+  // The wrist needs a virtual forearm reference to be measurable; when both
+  // captures read 0 the tool couldn't measure it (e.g. no forearm in frame),
+  // so we OMIT the wrist entry rather than export a degenerate 0/0 that would
+  // make normalizeJointAngle's slope guard kick in. We chose to omit (cleaner
+  // than a "no medido" stub) so a pasted JSON can't accidentally overwrite the
+  // real placeholder calibration with zeros.
+  const wristOpen = Math.round(Math.abs(draft.open.wrist) * 10) / 10;
+  const wristClosed = Math.round(Math.abs(draft.fist.wrist) * 10) / 10;
+  const wristMeasured = wristOpen !== 0 || wristClosed !== 0;
+
   const out = {
-    wrist: {
-      measuredOpen: Math.round(Math.abs(draft.open.wrist) * 10) / 10,
-      measuredClosed: Math.round(Math.abs(draft.fist.wrist) * 10) / 10,
-      clinicalMax: 90,
-      clinicalMin: -70,
-    },
+    ...(wristMeasured
+      ? {
+          wrist: {
+            measuredOpen: wristOpen,
+            measuredClosed: wristClosed,
+            clinicalMax: 90,
+            clinicalMin: -70,
+          },
+        }
+      : {}),
     MCP: {
       measuredOpen: Math.round(medianAcrossFingers(draft.open.fingerJoints, 'MCP') * 10) / 10,
       measuredClosed: Math.round(medianAcrossFingers(draft.fist.fingerJoints, 'MCP') * 10) / 10,

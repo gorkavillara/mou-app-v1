@@ -841,53 +841,77 @@ export function calculateWristAngle(landmarks: Point[], forearmPoint?: Point): n
 
 // --- Calibration & normalization (IA-03) ---
 // Maps raw measured degrees to the clinical 0–X° range.
-// IMPORTANT: the `measured*` values are placeholders pending validation
-// with Javi + goniometer (see docs/obsidian-vault/12-Convencion-angular.md).
+//
+// 2026-06-06 — FIRST real empirical capture (Gorka, technical calibration via
+// webcam, hand in profile, `/dev/calibration` tool). These replace the prior
+// guessed placeholders for MCP/PIP/DIP. NOTE: this is a TECHNICAL calibration
+// (sanity check of the pipeline), NOT the clinical one — the surgeon's
+// goniometer validation is still pending (OPS-1) and may shift these numbers.
+// See docs/mou-dev/12-Convencion-angular.md.
 
 export type JointCalibration = {
   measuredOpen: number;
   measuredClosed: number;
   clinicalMax: number;
-  /** Negative bound for joints that hyperextend (wrist, MCP). */
+  /** Negative bound for joints that hyperextend (wrist, MCP) or have an extension deficit (PIP/DIP). */
   clinicalMin?: number;
 };
 
 export const JOINT_CALIBRATION: Record<JointName, JointCalibration> = {
+  // wrist: NOT yet empirically calibrated — the capture tool has no forearm
+  // reference (see Task in CalibrationView; `calculateWristAngle` returns 0
+  // without one, so the 2026-06-06 capture came back 0/0 and was discarded).
+  // Placeholder until a capture or goniometer session provides real values.
   wrist: { measuredOpen: 15, measuredClosed: 95,  clinicalMax: 90, clinicalMin: -70 },
-  MCP:   { measuredOpen: 12, measuredClosed: 100, clinicalMax: 90, clinicalMin: -30 },
-  // PIP/DIP clinicalMin (BUG-4, surgeon feedback 2026-05-20): a healthy PIP/DIP
-  // barely hyperextends, but post-op EXTENSOR-TENDON patients sit near or below
-  // 0° (extension deficit: finger stuck in flexion can't reach 0°; mild
-  // hyperextension also exists). Without a clinicalMin, normalizeJointAngle
-  // flattens that whole region to 0 and the surgeon sees nothing — which is
-  // exactly the "NO MARCA LA EXTENSIÓN DE LAS INTERFALÁNGICAS" complaint. A
-  // -30° bound makes normalization RESOLVE the negative region (same
-  // negative-slope two-segment mapping already used by wrist/MCP) instead of
-  // clamping it. Empirical value pending goniometer calibration with Javi.
-  PIP:   { measuredOpen: 10, measuredClosed: 110, clinicalMax: 100, clinicalMin: -30 },
-  DIP:   { measuredOpen: 8,  measuredClosed: 95,  clinicalMax: 80,  clinicalMin: -30 },
+  // MCP/PIP/DIP: 2026-06-06 technical capture by Gorka (webcam, hand in profile).
+  MCP:   { measuredOpen: 12.3, measuredClosed: 98.8, clinicalMax: 90,  clinicalMin: -30 },
+  // PIP/DIP measuredOpen is NEGATIVE: with the hand flat-open MediaPipe reads
+  // the interphalangeals a few degrees past straight (−5.7 / −5.6). That is
+  // exactly why the unified-slope normalization (below) replaced the old
+  // asymmetric negative band. clinicalMin (BUG-4, surgeon feedback 2026-05-20):
+  // post-op EXTENSOR-TENDON patients sit near or below 0° (extension deficit /
+  // mild hyperextension); the −30° bound lets normalization RESOLVE that region
+  // instead of flattening it to 0 — the "NO MARCA LA EXTENSIÓN DE LAS
+  // INTERFALÁNGICAS" complaint. Bound still pending goniometer with Javi.
+  PIP:   { measuredOpen: -5.7, measuredClosed: 81.4, clinicalMax: 100, clinicalMin: -30 },
+  DIP:   { measuredOpen: -5.6, measuredClosed: 71.9, clinicalMax: 80,  clinicalMin: -30 },
 };
 
 /**
  * Linearly maps a raw measured angle to the clinical range using the joint's
- * calibration. Values outside the measured envelope are clamped.
+ * two-point calibration.
  *
- * For joints with `clinicalMin` (hyperextension capable), negative inputs are
- * mapped to the negative side of the clinical range with a separate slope so
- * that 0° always sits at the neutral position.
+ * 2026-06-06 — UNIFIED SLOPE. This replaced the previous two-branch formula
+ * (a separate positive segment and a negative "hyperextension band" that
+ * pivoted on `−measuredOpen` and divided by `measuredOpen`). The first real
+ * capture exposed two problems the old code couldn't handle:
+ *   1. `measuredOpen` can be NEGATIVE (PIP/DIP read −5.7/−5.6 when flat-open),
+ *      so dividing by it and pivoting on `−measuredOpen` was nonsense.
+ *   2. Raw inputs between `measuredOpen` and 0 fell into the negative branch and
+ *      were mapped with the wrong slope instead of resolving smoothly toward 0.
+ *
+ * A two-point calibration mathematically defines exactly ONE line: the points
+ * (measuredOpen → 0 clinical) and (measuredClosed → clinicalMax). We use that
+ * single slope everywhere. Inputs below `measuredOpen` extend linearly into the
+ * negative clinical band (down to `clinicalMin`, or 0 for joints with none);
+ * inputs above `measuredClosed` clamp at `clinicalMax`.
+ *
+ *   clinical(x) = (x − measuredOpen) · clinicalMax / (measuredClosed − measuredOpen)
+ *   clamped to [clinicalMin ?? 0, clinicalMax]
+ *
+ * Guard: if `measuredClosed − measuredOpen` is not a positive, finite range we
+ * return 0 — this protects against degenerate captures (e.g. the wrist coming
+ * back 0/0 because the calibration tool has no forearm reference) where the
+ * slope would be NaN/Infinity.
  */
 export function normalizeJointAngle(measuredDeg: number, joint: JointName): number {
   const cal = JOINT_CALIBRATION[joint];
-  if (measuredDeg >= 0) {
-    const range = cal.measuredClosed - cal.measuredOpen;
-    if (range <= 0) return 0;
-    const clamped = Math.max(cal.measuredOpen, Math.min(cal.measuredClosed, measuredDeg));
-    return ((clamped - cal.measuredOpen) / range) * cal.clinicalMax;
-  }
-  const minClinical = cal.clinicalMin ?? 0;
-  if (minClinical === 0) return 0;
-  const clamped = Math.max(-cal.measuredOpen, measuredDeg);
-  return (clamped / cal.measuredOpen) * Math.abs(minClinical);
+  const range = cal.measuredClosed - cal.measuredOpen;
+  if (!Number.isFinite(range) || range <= 0) return 0;
+
+  const clinical = ((measuredDeg - cal.measuredOpen) / range) * cal.clinicalMax;
+  const lowerBound = cal.clinicalMin ?? 0;
+  return Math.max(lowerBound, Math.min(cal.clinicalMax, clinical));
 }
 
 export function normalizeFingerJointAngles(raw: JointAngles): JointAngles {

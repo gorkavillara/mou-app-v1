@@ -122,28 +122,69 @@ describe('normalizeJointAngle', () => {
     expect(normalizeJointAngle(200, 'MCP')).toBeCloseTo(JOINT_CALIBRATION.MCP.clinicalMax, 5);
   });
 
-  it('clamps positive values below measuredOpen to 0', () => {
-    expect(normalizeJointAngle(0, 'MCP')).toBeCloseTo(0, 5);
+  // 2026-06-06: under the unified slope, an input BELOW measuredOpen no longer
+  // flattens to 0 — it extends linearly into the negative clinical band (down
+  // to clinicalMin). MCP measuredOpen is 12.3, so 0 raw sits below the open
+  // pose and reads slightly negative. Intent preserved: sub-open inputs resolve
+  // smoothly, they are not discarded.
+  it('maps a sub-measuredOpen MCP input below 0, not flattened to 0', () => {
+    const r = normalizeJointAngle(0, 'MCP');
+    expect(r).toBeLessThan(0);
+    expect(r).toBeGreaterThanOrEqual(JOINT_CALIBRATION.MCP.clinicalMin!);
   });
 
-  // BUG-4 (2026-05-20): PIP/DIP now have a hyperextension/extension-deficit
-  // bound (clinicalMin: -30). This test used to assert PIP/DIP flatten negative
-  // input to 0; it was deliberately changed because the surgeon needs that
-  // negative region resolved, not discarded.
-  it('maps negative PIP/DIP input into the negative clinical range, not 0', () => {
-    const pip = normalizeJointAngle(-JOINT_CALIBRATION.PIP.measuredOpen, 'PIP');
-    const dip = normalizeJointAngle(-JOINT_CALIBRATION.DIP.measuredOpen, 'DIP');
-    expect(pip).toBeCloseTo(JOINT_CALIBRATION.PIP.clinicalMin!, 5); // -30
-    expect(dip).toBeCloseTo(JOINT_CALIBRATION.DIP.clinicalMin!, 5); // -30
-    // A partial extension deficit maps proportionally into the negative band.
-    const halfPip = normalizeJointAngle(-JOINT_CALIBRATION.PIP.measuredOpen / 2, 'PIP');
-    expect(halfPip).toBeLessThan(0);
-    expect(halfPip).toBeGreaterThan(JOINT_CALIBRATION.PIP.clinicalMin!);
+  // 2026-06-06: unified-slope rewrite. The old BUG-4 tests asserted the
+  // asymmetric negative-band pivot (normalize(-measuredOpen) ≈ clinicalMin).
+  // That math is gone — a two-point calibration has exactly one slope. The
+  // INTENT is preserved: a raw input MORE extended than the open pose must
+  // resolve into the NEGATIVE clinical band (not flatten to 0), clamped at
+  // clinicalMin. We assert that on the new unified formula + real values.
+  it('maps measuredOpen to exactly 0 for every joint (new values)', () => {
+    for (const j of ['wrist', 'MCP', 'PIP', 'DIP'] as const) {
+      expect(normalizeJointAngle(JOINT_CALIBRATION[j].measuredOpen, j)).toBeCloseTo(0, 5);
+    }
   });
 
-  it('maps -measuredOpen to clinicalMin for joints with hyperextension', () => {
-    const cal = JOINT_CALIBRATION.wrist;
-    expect(normalizeJointAngle(-cal.measuredOpen, 'wrist')).toBeCloseTo(cal.clinicalMin!, 5);
+  it('maps measuredClosed to clinicalMax for every joint (new values)', () => {
+    for (const j of ['wrist', 'MCP', 'PIP', 'DIP'] as const) {
+      const cal = JOINT_CALIBRATION[j];
+      expect(normalizeJointAngle(cal.measuredClosed, j)).toBeCloseTo(cal.clinicalMax, 5);
+    }
+  });
+
+  it('resolves negative PIP/DIP input into the negative clinical band, not 0', () => {
+    // PIP measuredOpen is itself negative (−5.7). An input still MORE extended
+    // than the open pose must land below 0 in clinical degrees.
+    const pip = normalizeJointAngle(JOINT_CALIBRATION.PIP.measuredOpen - 5, 'PIP');
+    const dip = normalizeJointAngle(JOINT_CALIBRATION.DIP.measuredOpen - 5, 'DIP');
+    expect(pip).toBeLessThan(0);
+    expect(pip).toBeGreaterThanOrEqual(JOINT_CALIBRATION.PIP.clinicalMin!);
+    expect(dip).toBeLessThan(0);
+    expect(dip).toBeGreaterThanOrEqual(JOINT_CALIBRATION.DIP.clinicalMin!);
+  });
+
+  it('a PIP input more extended than the open pose maps negative; a far one clamps at clinicalMin', () => {
+    // −20 is more extended than measuredOpen (−5.7) but the linear map only
+    // reaches ~−16°, still inside the band.
+    const mild = normalizeJointAngle(-20, 'PIP');
+    expect(mild).toBeLessThan(0);
+    expect(mild).toBeGreaterThan(JOINT_CALIBRATION.PIP.clinicalMin!);
+    // −40 maps past −30 linearly, so the lower clamp must hold it at clinicalMin.
+    expect(normalizeJointAngle(-40, 'PIP')).toBeCloseTo(JOINT_CALIBRATION.PIP.clinicalMin!, 5);
+  });
+
+  it('returns 0 for a degenerate calibration (open === closed) instead of NaN/Infinity', () => {
+    // The wrist 0/0 capture is the real-world trigger; simulate the degenerate
+    // range directly so the guard is exercised regardless of the live config.
+    const original = { ...JOINT_CALIBRATION.wrist };
+    JOINT_CALIBRATION.wrist = { measuredOpen: 0, measuredClosed: 0, clinicalMax: 90, clinicalMin: -70 };
+    try {
+      const r = normalizeJointAngle(45, 'wrist');
+      expect(Number.isFinite(r)).toBe(true);
+      expect(r).toBe(0);
+    } finally {
+      JOINT_CALIBRATION.wrist = original;
+    }
   });
 });
 

@@ -50,14 +50,18 @@ El pulgar tiene cinemática distinta (oposición, abducción, MCP+IP solo). Lo d
 
 ## Tabla rápida de calibración
 
-| Articulación | 0° clínico | Tope clínico | Medido empírico (TBD) | Hiperext. |
+| Articulación | 0° clínico | Tope clínico | Medido empírico (abierto / cerrado) | Hiperext. |
 |---|---|---|---|---|
-| wrist | mano recta | +90° flex / −70° ext | _pendiente_ | sí |
-| MCP (índice/medio/anular/meñique) | dedo recto | 90° / −30° ext | _pendiente_ | leve |
-| PIP | falange media recta | 100° / −30° ext | _pendiente_ | sí (−30°, BUG-4 2026-05-20) |
-| DIP | falange distal recta | 80° / −30° ext | _pendiente_ | sí (−30°, BUG-4 2026-05-20) |
+| wrist | mano recta | +90° flex / −70° ext | _pendiente — la herramienta aún no mide muñeca_ | sí |
+| MCP (índice/medio/anular/meñique) | dedo recto | 90° / −30° ext | 12.3° / 98.8° (2026-06-06) | leve |
+| PIP | falange media recta | 100° / −30° ext | −5.7° / 81.4° (2026-06-06) | sí (−30°, BUG-4 2026-05-20) |
+| DIP | falange distal recta | 80° / −30° ext | −5.6° / 71.9° (2026-06-06) | sí (−30°, BUG-4 2026-05-20) |
 
-> Los valores **medido empírico** se rellenan en sesión presencial con Javi + goniómetro + la herramienta `/dev/calibration` (IA-04). No usar la app en producción hasta que esta tabla esté completa.
+> Los valores **medido empírico** de MCP/PIP/DIP provienen de la **captura técnica de Gorka (2026-06-06, webcam, mano de perfil); pendiente validación goniómetro (Javi)**. La muñeca sigue **pendiente — la herramienta `/dev/calibration` aún no mide muñeca** (no hay antebrazo virtual cableado allí; `calculateWristAngle` devuelve 0 sin él, ver `CalibrationView`). No usar la app en producción hasta que esta tabla esté validada clínicamente.
+
+> **Nota 2026-06-06 (normalización con pendiente única):** PIP/DIP miden negativo con la mano abierta (−5.7° / −5.6°). La normalización pasó de dos tramos (uno positivo + una "banda negativa" que pivotaba sobre `−measuredOpen`) a **una sola recta** definida por los dos puntos de calibración (`measuredOpen → 0`, `measuredClosed → tope`). Una calibración de dos puntos tiene exactamente una pendiente; los `measuredOpen` negativos rompían la fórmula antigua. Por debajo de `measuredOpen` se extiende linealmente hacia la banda negativa hasta `clinicalMin`; si `measuredClosed − measuredOpen` no es un rango positivo finito, devuelve 0 (protege capturas degeneradas como la muñeca 0/0).
+>
+> ⚠️ **Efecto colateral en la muñeca (placeholder 15/95):** con la recta única, la banda de hiperextensión de muñeca cambió de escala — antes raw −15 ya mapeaba a −70 clínico (el tramo negativo tenía pendiente propia); ahora −70 solo se alcanza a raw ≈ −47 (misma pendiente que la flexión). Irrelevante hoy porque la muñeca no está calibrada empíricamente ni se usa como driver, pero tenerlo presente cuando se capture la muñeca de verdad.
 
 ## Algoritmo de normalización
 
@@ -65,9 +69,9 @@ El pulgar tiene cinemática distinta (oposición, abducción, MCP+IP solo). Lo d
 clinical_deg = (measured_deg − measured_open) / (measured_closed − measured_open) × clinical_max
 ```
 
-Con `clamp` a [0, clinical_max].
+Con `clamp` a `[clinical_min ?? 0, clinical_max]`.
 
-Para articulaciones con hiperextensión (wrist, MCP), aplicar la fórmula en dos tramos: uno por encima de 0 (flexión) y otro por debajo (extensión), con `measured_open` como punto de pivote.
+**2026-06-06 — pendiente única.** Es la misma recta para todo el rango: una calibración de dos puntos define exactamente una pendiente. No hay tramos separados ni pivote sobre `−measured_open` (la fórmula antigua se rompía cuando `measured_open` era negativo, como en PIP/DIP). Por debajo de `measured_open` la recta entra de forma natural en la banda negativa hasta `clinical_min` (0 para articulaciones sin hiperextensión). Si `measured_closed − measured_open` no es un rango positivo finito, la función devuelve 0.
 
 ## Validación clínica (gate antes del piloto)
 
