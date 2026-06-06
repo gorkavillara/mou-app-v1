@@ -26,6 +26,7 @@ mou-board-version: 1
 
 ## ✅ Hecho
 
+- [x] **UX-5** [P2] Ficha clínica: `surgery_date` + `surgery_note` en alta y ficha ("IQ 19/5/26 · Tenorrafia FDP 5º dedo"), PATCH multi-campo, NO expuesta al paciente (D3) ✓ 2026-05-20 #backend #frontend
 - [x] **UX-1** [P1] Copy "3 series de 20 repeticiones, 4 veces al día" en home e intro (plural-aware) ✓ 2026-05-20 #frontend
 - [x] **UX-2** [P1] Sesión por series: fase `resting`, "Repetición X de N · Serie Y de Z", descanso entre series ✓ 2026-05-20 #frontend
 - [x] **UX-4** [P1] Dedo lesionado: `patients.injured_finger` + PATCH + selector en alta + control inline en ficha + driver de medición + naranja en sesión ✓ 2026-05-20 #backend #frontend
