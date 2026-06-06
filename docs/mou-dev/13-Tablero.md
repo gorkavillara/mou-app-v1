@@ -26,6 +26,9 @@ mou-board-version: 1
 
 ## ✅ Hecho
 
+- [x] **FB-1** [P1] Dedos afectados múltiples: `injured_fingers[]` + `amputated_fingers[]`, picker N/L/A, driver multi-dedo, amputados excluidos ✓ 2026-06-06 #backend #frontend
+- [x] **FB-2** [P2] Contraste de títulos en done-screen del paciente (gray-900) ✓ 2026-06-06 #frontend
+- [x] **CAL-1** Primera calibración real (MCP/PIP/DIP de Gorka) + normalización de pendiente única + gate `CALIBRATION_KEY` operativo en Vercel ✓ 2026-06-06 #ia #infra
 - [x] **UX-5** [P2] Ficha clínica: `surgery_date` + `surgery_note` en alta y ficha ("IQ 19/5/26 · Tenorrafia FDP 5º dedo"), PATCH multi-campo, NO expuesta al paciente (D3) ✓ 2026-05-20 #backend #frontend
 - [x] **UX-1** [P1] Copy "3 series de 20 repeticiones, 4 veces al día" en home e intro (plural-aware) ✓ 2026-05-20 #frontend
 - [x] **UX-2** [P1] Sesión por series: fase `resting`, "Repetición X de N · Serie Y de Z", descanso entre series ✓ 2026-05-20 #frontend
