@@ -1,11 +1,11 @@
 import { z } from 'zod';
 
 /**
- * UX-4 (2026-05-20): the operated finger. Values match the `FingerName` type
+ * FB-1 (2026-06-06): a single finger name. Values match the `FingerName` type
  * in src/lib/hand-tracking.ts EXACTLY (Spanish, identical strings) and the DB
- * CHECK constraint in 20260520120000_injured_finger.sql.
+ * CHECK constraints in 20260606120000_finger_status_arrays.sql.
  */
-export const injuredFingerSchema = z.enum([
+export const fingerNameSchema = z.enum([
   'pulgar',
   'indice',
   'medio',
@@ -13,7 +13,31 @@ export const injuredFingerSchema = z.enum([
   'menique',
 ]);
 
-export type InjuredFinger = z.infer<typeof injuredFingerSchema>;
+export type FingerName = z.infer<typeof fingerNameSchema>;
+
+/**
+ * FB-1 (2026-06-06): an array of distinct finger names (max 5, no duplicates).
+ * Used for both `injured_fingers` and `amputated_fingers`. Cross-array overlap
+ * is validated by `.refine` on the parent schemas (and by the DB constraint
+ * `fingers_no_overlap` as a backstop).
+ */
+const fingerArraySchema = z
+  .array(fingerNameSchema)
+  .max(5, { error: 'at most 5 fingers' })
+  .refine((arr) => new Set(arr).size === arr.length, {
+    error: 'finger values must be unique',
+  });
+
+/** FB-1: the two arrays must not share any finger. */
+function noOverlap(
+  body: { injured_fingers?: FingerName[]; amputated_fingers?: FingerName[] },
+): boolean {
+  const injured = body.injured_fingers ?? [];
+  const amputated = body.amputated_fingers ?? [];
+  if (injured.length === 0 || amputated.length === 0) return true;
+  const injuredSet = new Set(injured);
+  return !amputated.some((f) => injuredSet.has(f));
+}
 
 /**
  * UX-5 (2026-05-20): a strict YYYY-MM-DD date that must also be a real calendar
@@ -70,47 +94,72 @@ const externalIdSchema = z
  * so that any extra field — including PII fields someone might add by accident —
  * causes a validation error. Defense in depth: the DB also lacks those columns.
  *
- * UX-4: `injured_finger` is optional on create; absence is fine. We do NOT
- * accept `null` here (just omit it) — clearing happens via PATCH.
+ * FB-1: `injured_fingers` and `amputated_fingers` are optional arrays on
+ * create; omission = `[]`. Each holds up to 5 distinct finger names and the two
+ * arrays must NOT overlap (`.refine`). The legacy singular `injured_finger` is
+ * REMOVED — `.strict()` now rejects it.
  *
  * UX-5: `surgery_date` (valid calendar YYYY-MM-DD) and `surgery_note` (trimmed
- * 1..120 chars) are optional on create. Same rule: omit rather than send null;
- * clearing happens via PATCH.
+ * 1..120 chars) are optional on create. Omit rather than send null; clearing
+ * happens via PATCH.
  */
 export const createPatientSchema = z
   .object({
     external_id: externalIdSchema,
     pathology_code: z.enum(['flexor', 'extensor', 'otros']).optional(),
-    injured_finger: injuredFingerSchema.optional(),
+    injured_fingers: fingerArraySchema.optional(),
+    amputated_fingers: fingerArraySchema.optional(),
     surgery_date: isoCalendarDate.optional(),
     surgery_note: surgeryNoteSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine(noOverlap, {
+    error: 'a finger cannot be both injured and amputated',
+    path: ['amputated_fingers'],
+  });
 
 export type CreatePatientInput = z.infer<typeof createPatientSchema>;
 
 /**
- * Body schema for PATCH /api/doctor/patients/:id (UX-4 + UX-5).
+ * Body schema for PATCH /api/doctor/patients/:id (FB-1 + UX-5).
  *
  * The body may carry any NON-EMPTY subset of the clinical-record fields:
- *   - `injured_finger`: finger | null  (null clears → all-fingers average)
- *   - `surgery_date`:   YYYY-MM-DD | null (UX-5; null clears)
- *   - `surgery_note`:   1..120 chars | null (UX-5; null clears)
+ *   - `injured_fingers`:   FingerName[] (FULL REPLACEMENT; send `[]` to clear —
+ *                          NO null for arrays)
+ *   - `amputated_fingers`: FingerName[] (FULL REPLACEMENT; send `[]` to clear)
+ *   - `surgery_date`:      YYYY-MM-DD | null (UX-5; null clears)
+ *   - `surgery_note`:      1..120 chars | null (UX-5; null clears)
  *
  * Every field is `.optional()` so partial updates work, but `.refine` rejects
  * `{}` (at least one key required) — a no-op PATCH is a client mistake (400).
- * `.strict()` still rejects any other field, including PII (D3).
+ * `.strict()` still rejects any other field, including the legacy
+ * `injured_finger` and any PII (D3).
+ *
+ * Cross-field no-overlap is enforced here ONLY when BOTH arrays are present in
+ * the same request. When only ONE array is sent, the route must validate it
+ * against the OTHER array's CURRENT DB value before writing (read-modify-validate).
  */
 export const patchPatientSchema = z
   .object({
-    injured_finger: injuredFingerSchema.nullable().optional(),
+    injured_fingers: fingerArraySchema.optional(),
+    amputated_fingers: fingerArraySchema.optional(),
     surgery_date: isoCalendarDate.nullable().optional(),
     surgery_note: surgeryNoteSchema.nullable().optional(),
   })
   .strict()
   .refine((body) => Object.keys(body).length > 0, {
     error: 'at least one field is required',
-  });
+  })
+  .refine(
+    (body) =>
+      // Only enforce here when BOTH arrays are present; the single-array case
+      // is validated against the DB in the route.
+      !(body.injured_fingers && body.amputated_fingers) || noOverlap(body),
+    {
+      error: 'a finger cannot be both injured and amputated',
+      path: ['amputated_fingers'],
+    },
+  );
 
 export type PatchPatientInput = z.infer<typeof patchPatientSchema>;
 

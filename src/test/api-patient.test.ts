@@ -111,7 +111,8 @@ describe('GET /api/patient/[token] (B-11)', () => {
           id: 'p1',
           external_id: 'HC-001',
           pathology_code: 'flexor',
-          injured_finger: 'menique',
+          injured_fingers: ['menique', 'anular'],
+          amputated_fingers: ['pulgar'],
           started_at: '2026-05-01',
           discharged_at: null,
         },
@@ -157,8 +158,10 @@ describe('GET /api/patient/[token] (B-11)', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.patient.id).toBe('p1');
-    // UX-4: the session uses injured_finger as measurement driver.
-    expect(body.patient.injured_finger).toBe('menique');
+    // FB-1: injured fingers drive measurement (orange); amputated are excluded
+    // (dashed gray). The session needs both arrays.
+    expect(body.patient.injured_fingers).toEqual(['menique', 'anular']);
+    expect(body.patient.amputated_fingers).toEqual(['pulgar']);
     expect(body.prescriptions).toHaveLength(1);
     expect(body.prescriptions[0].exercise.code).toBe('flexion-pasiva-dedos');
     expect(body.today.sessions_target).toBe(4);
@@ -178,7 +181,8 @@ describe('GET /api/patient/[token] (B-11)', () => {
             id: 'p1',
             external_id: 'HC-001',
             pathology_code: 'flexor',
-            injured_finger: 'menique',
+            injured_fingers: ['menique'],
+            amputated_fingers: [],
             started_at: '2026-05-01',
             discharged_at: null,
           },

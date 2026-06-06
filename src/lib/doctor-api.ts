@@ -1,6 +1,6 @@
 import 'server-only';
 import { headers, cookies } from 'next/headers';
-import type { PathologyCode, TrackedJoint, InjuredFinger } from './database.types';
+import type { PathologyCode, TrackedJoint, FingerName } from './database.types';
 
 /**
  * Doctor API client (server-side only).
@@ -37,8 +37,10 @@ export type PatientListItem = {
   id: string;
   external_id: string;
   pathology_code: PathologyCode | null;
-  // UX-4: operated finger (null = not specified).
-  injured_finger: InjuredFinger | null;
+  // FB-1: affected fingers. injured = measured (orange); amputated = excluded
+  // from measurement (dashed gray). Empty arrays = none specified.
+  injured_fingers: FingerName[];
+  amputated_fingers: FingerName[];
   // Round 3: intervention date (YYYY-MM-DD) + short surgical descriptor.
   surgery_date: string | null;
   surgery_note: string | null;
@@ -109,8 +111,10 @@ export type PatientDetail = {
   id: string;
   external_id: string;
   pathology_code: PathologyCode | null;
-  // UX-4: operated finger (null = not specified).
-  injured_finger: InjuredFinger | null;
+  // FB-1: affected fingers. injured = measured (orange); amputated = excluded
+  // from measurement (dashed gray). Empty arrays = none specified.
+  injured_fingers: FingerName[];
+  amputated_fingers: FingerName[];
   // Round 3: intervention date (YYYY-MM-DD) + short surgical descriptor.
   surgery_date: string | null;
   surgery_note: string | null;

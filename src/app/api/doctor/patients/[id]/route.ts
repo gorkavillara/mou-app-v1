@@ -28,7 +28,7 @@ export async function GET(
   const { data: patient, error: patientErr } = await supabase
     .from('patients')
     .select(
-      'id, external_id, pathology_code, injured_finger, surgery_date, surgery_note, access_token, started_at, discharged_at, created_at, updated_at',
+      'id, external_id, pathology_code, injured_fingers, amputated_fingers, surgery_date, surgery_note, access_token, started_at, discharged_at, created_at, updated_at',
     )
     .eq('id', id)
     .maybeSingle();
@@ -118,16 +118,25 @@ export async function GET(
 }
 
 /**
- * UX-4 + UX-5 — PATCH /api/doctor/patients/:id
+ * FB-1 + UX-5 — PATCH /api/doctor/patients/:id
  *
  * Updates a non-empty subset of the clinical-record fields:
- *   { injured_finger?: <finger>|null, surgery_date?: 'YYYY-MM-DD'|null,
- *     surgery_note?: string|null }
- * `null` clears a field (injured_finger NULL = all-fingers average). At least
- * one key is required (`{}` → 400, enforced by the schema's refine). Strict Zod
- * rejects any other field (D3). Only the keys present in the body are written,
- * so a PATCH never clobbers a field the caller didn't mention. RLS filters by
- * doctor_id; an empty update result is translated into 404.
+ *   { injured_fingers?: FingerName[], amputated_fingers?: FingerName[],
+ *     surgery_date?: 'YYYY-MM-DD'|null, surgery_note?: string|null }
+ *
+ * Arrays are FULL REPLACEMENT (send `[]` to clear — no null for arrays). For
+ * dates/notes, `null` clears. At least one key is required (`{}` → 400, enforced
+ * by the schema's refine). Strict Zod rejects any other field, including the
+ * legacy `injured_finger` (D3). Only the keys present in the body are written,
+ * so a PATCH never clobbers a field the caller didn't mention.
+ *
+ * No-overlap between injured/amputated: when BOTH arrays are present the schema
+ * refine catches it. When only ONE is sent, we read the OTHER array's current
+ * DB value and validate the union has no overlap BEFORE writing
+ * (read-modify-validate). As a backstop, the DB constraint `fingers_no_overlap`
+ * would raise 23514; we map that to the same clean 400 `fingers_overlap`.
+ *
+ * RLS filters by doctor_id; an empty update result is translated into 404.
  *
  * Next.js 16: dynamic route params are async (Promise<{ id: string }>).
  */
@@ -162,24 +171,75 @@ export async function PATCH(
   // partial PATCH never clobbers a field the caller didn't mention. The schema
   // already guarantees at least one key (rejects `{}`).
   const update: {
-    injured_finger?: typeof body.injured_finger;
+    injured_fingers?: typeof body.injured_fingers;
+    amputated_fingers?: typeof body.amputated_fingers;
     surgery_date?: typeof body.surgery_date;
     surgery_note?: typeof body.surgery_note;
   } = {};
-  if ('injured_finger' in body) update.injured_finger = body.injured_finger;
+  if ('injured_fingers' in body) update.injured_fingers = body.injured_fingers;
+  if ('amputated_fingers' in body)
+    update.amputated_fingers = body.amputated_fingers;
   if ('surgery_date' in body) update.surgery_date = body.surgery_date;
   if ('surgery_note' in body) update.surgery_note = body.surgery_note;
+
+  // FB-1: single-array overlap check (read-modify-validate). When exactly ONE
+  // of the two finger arrays is being changed, validate it against the OTHER
+  // array's CURRENT DB value (the schema refine only fires when both are in the
+  // same request). The DB constraint is a backstop; we prefer a clean 400.
+  const onlyInjured =
+    'injured_fingers' in body && !('amputated_fingers' in body);
+  const onlyAmputated =
+    'amputated_fingers' in body && !('injured_fingers' in body);
+  if (onlyInjured || onlyAmputated) {
+    const { data: current, error: readErr } = await supabase
+      .from('patients')
+      .select('injured_fingers, amputated_fingers')
+      .eq('id', id)
+      .maybeSingle();
+    if (readErr) return errorResponse('db_error', 500, readErr.message);
+    if (!current) return errorResponse('not_found', 404);
+
+    const cur = current as {
+      injured_fingers: string[] | null;
+      amputated_fingers: string[] | null;
+    };
+    const injured: string[] = onlyInjured
+      ? body.injured_fingers ?? []
+      : cur.injured_fingers ?? [];
+    const amputated: string[] = onlyAmputated
+      ? body.amputated_fingers ?? []
+      : cur.amputated_fingers ?? [];
+    const injuredSet = new Set(injured);
+    if (amputated.some((f) => injuredSet.has(f))) {
+      return errorResponse(
+        'fingers_overlap',
+        400,
+        'a finger cannot be both injured and amputated',
+      );
+    }
+  }
 
   const { data: patient, error } = await supabase
     .from('patients')
     .update(update)
     .eq('id', id)
     .select(
-      'id, external_id, pathology_code, injured_finger, surgery_date, surgery_note, access_token, started_at, discharged_at, created_at, updated_at',
+      'id, external_id, pathology_code, injured_fingers, amputated_fingers, surgery_date, surgery_note, access_token, started_at, discharged_at, created_at, updated_at',
     )
     .maybeSingle();
 
-  if (error) return errorResponse('db_error', 500, error.message);
+  if (error) {
+    // 23514 = check_violation. The relevant constraint is fingers_no_overlap;
+    // map it to a clean 400 instead of leaking a raw 500.
+    if (error.code === '23514' && /fingers_no_overlap/.test(error.message ?? '')) {
+      return errorResponse(
+        'fingers_overlap',
+        400,
+        'a finger cannot be both injured and amputated',
+      );
+    }
+    return errorResponse('db_error', 500, error.message);
+  }
   if (!patient) return errorResponse('not_found', 404);
 
   return NextResponse.json({ patient });

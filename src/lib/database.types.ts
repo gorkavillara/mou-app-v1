@@ -8,8 +8,8 @@ export type Json =
 
 export type PathologyCode = 'flexor' | 'extensor' | 'otros';
 export type TargetFinger = 'thumb' | 'index' | 'middle' | 'ring' | 'pinky' | 'all';
-// UX-4: operated finger. Identical to FingerName in src/lib/hand-tracking.ts.
-export type InjuredFinger = 'pulgar' | 'indice' | 'medio' | 'anular' | 'menique';
+// FB-1: a finger name. Identical to FingerName in src/lib/hand-tracking.ts.
+export type FingerName = 'pulgar' | 'indice' | 'medio' | 'anular' | 'menique';
 export type TrackedJoint = 'wrist' | 'MCP' | 'PIP' | 'DIP';
 export type QualityFlag = 'clean' | 'low_visibility' | 'low_confidence' | 'partial';
 
@@ -56,7 +56,10 @@ export interface Database {
           doctor_id: string;
           external_id: string;
           pathology_code: PathologyCode | null;
-          injured_finger: InjuredFinger | null;
+          // FB-1: affected fingers. injured = measured (orange);
+          // amputated = excluded from measurement (dashed gray). No overlap.
+          injured_fingers: FingerName[];
+          amputated_fingers: FingerName[];
           // UX-5: surgical record (date + bounded free-text descriptor).
           surgery_date: string | null;
           surgery_note: string | null;
@@ -71,7 +74,9 @@ export interface Database {
           doctor_id: string;
           external_id: string;
           pathology_code?: PathologyCode | null;
-          injured_finger?: InjuredFinger | null;
+          // FB-1: default '{}' in the DB, so optional on insert.
+          injured_fingers?: FingerName[];
+          amputated_fingers?: FingerName[];
           // UX-5: surgical record (date + bounded free-text descriptor).
           surgery_date?: string | null;
           surgery_note?: string | null;

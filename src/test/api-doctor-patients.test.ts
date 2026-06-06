@@ -154,18 +154,23 @@ describe('POST /api/doctor/patients (B-06)', () => {
     expect(res.status).toBe(400);
   });
 
-  it('201 persists injured_finger (UX-4)', async () => {
+  it('201 persists injured_fingers + amputated_fingers arrays (FB-1)', async () => {
     handlers['patients:insert'] = [
       ({ args }) => {
-        const row = (args[0] ?? {}) as { injured_finger?: string | null };
-        expect(row.injured_finger).toBe('menique');
+        const row = (args[0] ?? {}) as {
+          injured_fingers?: string[];
+          amputated_fingers?: string[];
+        };
+        expect(row.injured_fingers).toEqual(['menique', 'anular']);
+        expect(row.amputated_fingers).toEqual(['pulgar']);
         return {
           data: {
             id: 'p1',
             doctor_id: authUser!.id,
             external_id: 'HC-002',
             pathology_code: 'flexor',
-            injured_finger: 'menique',
+            injured_fingers: ['menique', 'anular'],
+            amputated_fingers: ['pulgar'],
             access_token: 'tok-xyz',
             started_at: '2026-05-20',
             discharged_at: null,
@@ -180,18 +185,80 @@ describe('POST /api/doctor/patients (B-06)', () => {
     const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
       external_id: 'HC-002',
       pathology_code: 'flexor',
-      injured_finger: 'menique',
+      injured_fingers: ['menique', 'anular'],
+      amputated_fingers: ['pulgar'],
     });
     const res = await createPatient(req);
     expect(res.status).toBe(201);
     const body = await res.json();
-    expect(body.patient.injured_finger).toBe('menique');
+    expect(body.patient.injured_fingers).toEqual(['menique', 'anular']);
+    expect(body.patient.amputated_fingers).toEqual(['pulgar']);
   });
 
-  it('400 when injured_finger is invalid (UX-4)', async () => {
+  it('201 defaults missing finger arrays to [] (FB-1)', async () => {
+    handlers['patients:insert'] = [
+      ({ args }) => {
+        const row = (args[0] ?? {}) as {
+          injured_fingers?: string[];
+          amputated_fingers?: string[];
+        };
+        expect(row.injured_fingers).toEqual([]);
+        expect(row.amputated_fingers).toEqual([]);
+        return {
+          data: {
+            id: 'p1',
+            doctor_id: authUser!.id,
+            external_id: 'HC-002b',
+            pathology_code: null,
+            injured_fingers: [],
+            amputated_fingers: [],
+            access_token: 'tok-empty',
+            started_at: '2026-05-20',
+            discharged_at: null,
+            created_at: '2026-05-20T10:00:00Z',
+            updated_at: '2026-05-20T10:00:00Z',
+          },
+          error: null,
+        };
+      },
+    ];
+    const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
+      external_id: 'HC-002b',
+    });
+    const res = await createPatient(req);
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.patient.injured_fingers).toEqual([]);
+    expect(body.patient.amputated_fingers).toEqual([]);
+  });
+
+  it('400 when a finger value is invalid (FB-1)', async () => {
     const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
       external_id: 'HC-003',
-      injured_finger: 'pinky', // English — not a valid FingerName
+      injured_fingers: ['pinky'], // English — not a valid FingerName
+    });
+    const res = await createPatient(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('invalid_body');
+  });
+
+  it('400 when injured/amputated arrays overlap in one request (FB-1)', async () => {
+    const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
+      external_id: 'HC-003b',
+      injured_fingers: ['menique', 'anular'],
+      amputated_fingers: ['anular'], // overlaps with injured
+    });
+    const res = await createPatient(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('invalid_body');
+  });
+
+  it('400 when legacy injured_finger (singular) is sent (FB-1 strict)', async () => {
+    const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
+      external_id: 'HC-003c',
+      injured_finger: 'menique', // removed field — strict schema rejects it
     });
     const res = await createPatient(req);
     expect(res.status).toBe(400);
@@ -271,7 +338,7 @@ describe('POST /api/doctor/patients (B-06)', () => {
     const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
       external_id: 'HC-005',
       pathology_code: 'flexor',
-      injured_finger: 'menique',
+      injured_fingers: ['menique'],
       surgery_date: '2026-05-19',
       surgery_note: 'Tenorrafia FDP 5º dedo',
     });
@@ -569,18 +636,23 @@ describe('POST /api/doctor/patients/:id/discharge (B-10)', () => {
   });
 });
 
-describe('PATCH /api/doctor/patients/:id (UX-4)', () => {
-  it('sets injured_finger (200 + updated patient)', async () => {
+describe('PATCH /api/doctor/patients/:id (FB-1)', () => {
+  it('replaces injured_fingers + amputated_fingers (200 + updated patient)', async () => {
     handlers['patients:update'] = [
       ({ args }) => {
-        const row = (args[0] ?? {}) as { injured_finger?: string | null };
-        expect(row.injured_finger).toBe('anular');
+        const row = (args[0] ?? {}) as {
+          injured_fingers?: string[];
+          amputated_fingers?: string[];
+        };
+        expect(row.injured_fingers).toEqual(['anular', 'medio']);
+        expect(row.amputated_fingers).toEqual(['pulgar']);
         return {
           data: {
             id: 'p1',
             external_id: 'HC-001',
             pathology_code: 'flexor',
-            injured_finger: 'anular',
+            injured_fingers: ['anular', 'medio'],
+            amputated_fingers: ['pulgar'],
             access_token: 'tok-abc',
             started_at: '2026-05-01',
             discharged_at: null,
@@ -594,25 +666,27 @@ describe('PATCH /api/doctor/patients/:id (UX-4)', () => {
     const req = jsonRequest(
       'http://localhost:3500/api/doctor/patients/p1',
       'PATCH',
-      { injured_finger: 'anular' },
+      { injured_fingers: ['anular', 'medio'], amputated_fingers: ['pulgar'] },
     );
     const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.patient.injured_finger).toBe('anular');
+    expect(body.patient.injured_fingers).toEqual(['anular', 'medio']);
+    expect(body.patient.amputated_fingers).toEqual(['pulgar']);
   });
 
-  it('clears injured_finger when null (200)', async () => {
+  it('clears injured_fingers with [] (200)', async () => {
     handlers['patients:update'] = [
       ({ args }) => {
-        const row = (args[0] ?? {}) as { injured_finger?: string | null };
-        expect(row.injured_finger).toBeNull();
+        const row = (args[0] ?? {}) as { injured_fingers?: string[] };
+        expect(row.injured_fingers).toEqual([]);
         return {
           data: {
             id: 'p1',
             external_id: 'HC-001',
             pathology_code: 'flexor',
-            injured_finger: null,
+            injured_fingers: [],
+            amputated_fingers: ['pulgar'],
             access_token: 'tok-abc',
             started_at: '2026-05-01',
             discharged_at: null,
@@ -623,23 +697,98 @@ describe('PATCH /api/doctor/patients/:id (UX-4)', () => {
         };
       },
     ];
+    // Single-array PATCH triggers read-modify-validate: stub the current DB row.
+    handlers['patients:select'] = [
+      () => ({
+        data: { injured_fingers: ['anular'], amputated_fingers: ['pulgar'] },
+        error: null,
+      }),
+    ];
     const req = jsonRequest(
       'http://localhost:3500/api/doctor/patients/p1',
       'PATCH',
-      { injured_finger: null },
+      { injured_fingers: [] },
     );
     const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.patient.injured_finger).toBeNull();
+    expect(body.patient.injured_fingers).toEqual([]);
+  });
+
+  it('400 fingers_overlap when single-array PATCH overlaps the OTHER array in DB (FB-1)', async () => {
+    // Body sends only injured_fingers=['anular']; the DB already has
+    // amputated_fingers=['anular'] → read-modify-validate must reject before
+    // writing. The update handler must NOT run.
+    handlers['patients:select'] = [
+      () => ({
+        data: { injured_fingers: [], amputated_fingers: ['anular'] },
+        error: null,
+      }),
+    ];
+    handlers['patients:update'] = [
+      () => {
+        throw new Error('update must not run when overlap is detected');
+      },
+    ];
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      { injured_fingers: ['anular'] },
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('fingers_overlap');
+  });
+
+  it('400 fingers_overlap when both arrays overlap in one request (FB-1)', async () => {
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      { injured_fingers: ['anular'], amputated_fingers: ['anular'] },
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    // Schema-level refine → invalid_body (both arrays present in one request).
+    expect(body.error).toBe('invalid_body');
+  });
+
+  it('400 fingers_overlap mapped from DB 23514 backstop (FB-1)', async () => {
+    handlers['patients:select'] = [
+      () => ({
+        data: { injured_fingers: [], amputated_fingers: [] },
+        error: null,
+      }),
+    ];
+    handlers['patients:update'] = [
+      () => ({
+        data: null,
+        error: {
+          code: '23514',
+          message: 'new row violates check constraint "fingers_no_overlap"',
+        },
+      }),
+    ];
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      { injured_fingers: ['anular'] },
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('fingers_overlap');
   });
 
   it('404 when patient not visible', async () => {
+    // surgery_note-only PATCH skips read-modify-validate, so the update runs
+    // directly and returns no row → 404.
     handlers['patients:update'] = [() => ({ data: null, error: null })];
     const req = jsonRequest(
       'http://localhost:3500/api/doctor/patients/p1',
       'PATCH',
-      { injured_finger: 'pulgar' },
+      { surgery_note: 'Tenorrafia' },
     );
     const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
     expect(res.status).toBe(404);
@@ -649,7 +798,19 @@ describe('PATCH /api/doctor/patients/:id (UX-4)', () => {
     const req = jsonRequest(
       'http://localhost:3500/api/doctor/patients/p1',
       'PATCH',
-      { injured_finger: 'pulgar', name: 'Juan' },
+      { injured_fingers: ['pulgar'], name: 'Juan' },
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('invalid_body');
+  });
+
+  it('400 on legacy injured_finger (singular) key — strict (FB-1)', async () => {
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      { injured_finger: 'pulgar' },
     );
     const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
     expect(res.status).toBe(400);
@@ -661,7 +822,7 @@ describe('PATCH /api/doctor/patients/:id (UX-4)', () => {
     const req = jsonRequest(
       'http://localhost:3500/api/doctor/patients/p1',
       'PATCH',
-      { injured_finger: 'thumb' },
+      { injured_fingers: ['thumb'] },
     );
     const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
     expect(res.status).toBe(400);
@@ -742,20 +903,30 @@ describe('PATCH /api/doctor/patients/:id (UX-4)', () => {
     expect(body.patient.surgery_note).toBeNull();
   });
 
-  it('combined update: injured_finger + surgery_note in one call (200)', async () => {
+  it('combined update: injured_fingers + surgery_note in one call (200)', async () => {
+    // Single array present (injured_fingers) → read-modify-validate against the
+    // current amputated_fingers in DB.
+    handlers['patients:select'] = [
+      () => ({
+        data: { injured_fingers: [], amputated_fingers: [] },
+        error: null,
+      }),
+    ];
     handlers['patients:update'] = [
       ({ args }) => {
         const row = (args[0] ?? {}) as Record<string, unknown>;
-        expect(row.injured_finger).toBe('anular');
+        expect(row.injured_fingers).toEqual(['anular']);
         expect(row.surgery_note).toBe('Tenorrafia');
-        // surgery_date not sent → not written.
+        // surgery_date and amputated_fingers not sent → not written.
         expect('surgery_date' in row).toBe(false);
+        expect('amputated_fingers' in row).toBe(false);
         return {
           data: {
             id: 'p1',
             external_id: 'HC-001',
             pathology_code: 'flexor',
-            injured_finger: 'anular',
+            injured_fingers: ['anular'],
+            amputated_fingers: [],
             surgery_date: null,
             surgery_note: 'Tenorrafia',
             access_token: 'tok-abc',
@@ -771,12 +942,12 @@ describe('PATCH /api/doctor/patients/:id (UX-4)', () => {
     const req = jsonRequest(
       'http://localhost:3500/api/doctor/patients/p1',
       'PATCH',
-      { injured_finger: 'anular', surgery_note: 'Tenorrafia' },
+      { injured_fingers: ['anular'], surgery_note: 'Tenorrafia' },
     );
     const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.patient.injured_finger).toBe('anular');
+    expect(body.patient.injured_fingers).toEqual(['anular']);
     expect(body.patient.surgery_note).toBe('Tenorrafia');
   });
 
