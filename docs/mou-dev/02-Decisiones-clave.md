@@ -16,6 +16,8 @@
 **Por qué**: *"Solo vamos a poner números paciente. Yo cojo en el Excel: número de historia, nombre, patología, y se le adjudica el número uno"*. La PII se queda en el Excel del médico.
 **Implementación**: Campo `external_id` (string libre) único por doctor. Sin email, sin teléfono, sin DOB.
 
+**Nota 2026-05-20 (UX-5)**: a petición del cirujano (test Javi 2026-05-20: *"quizá molaría poder poner el día de la intervención quirúrgica … y algún hueco para poner tenorrafia FDP 5º dedo"*) se añaden `surgery_date` (date) y `surgery_note` (text, máx. 120 chars) a `patients`. Justificación de anonimato: ninguno de los dos campos identifica a una persona; `surgery_note` es jerga clínica acotada (120 chars) y la UI instruye explícitamente a no escribir nombres. La API por token del paciente (`/api/patient/[token]`) **nunca** expone estos campos (minimización de datos): sólo los lee el panel del doctor.
+
 ## D4 — Catálogo inicial de 2 ejercicios
 **Decisión**: Empezamos con **flexión pasiva de dedos** y **extensión activa de dedos**.
 **Por qué**: *"Solo tenemos dos ejercicios porque son dos ejercicios muy básicos para cualquier patología en particular ahora de momento. Vamos a probar solo con eso, no vamos a hacer 100.000 ejercicios"*.

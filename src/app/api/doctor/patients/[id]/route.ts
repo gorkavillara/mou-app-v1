@@ -28,7 +28,7 @@ export async function GET(
   const { data: patient, error: patientErr } = await supabase
     .from('patients')
     .select(
-      'id, external_id, pathology_code, injured_finger, access_token, started_at, discharged_at, created_at, updated_at',
+      'id, external_id, pathology_code, injured_finger, surgery_date, surgery_note, access_token, started_at, discharged_at, created_at, updated_at',
     )
     .eq('id', id)
     .maybeSingle();
@@ -118,12 +118,16 @@ export async function GET(
 }
 
 /**
- * UX-4 — PATCH /api/doctor/patients/:id
+ * UX-4 + UX-5 — PATCH /api/doctor/patients/:id
  *
- * Updates the patient's `injured_finger`. Body: { injured_finger: <finger> | null }
- * (null clears it → NULL = measure the all-fingers average). Strict Zod, exactly
- * this one field for now. RLS filters by doctor_id; an empty update result is
- * translated into 404 (patient not visible to this doctor).
+ * Updates a non-empty subset of the clinical-record fields:
+ *   { injured_finger?: <finger>|null, surgery_date?: 'YYYY-MM-DD'|null,
+ *     surgery_note?: string|null }
+ * `null` clears a field (injured_finger NULL = all-fingers average). At least
+ * one key is required (`{}` → 400, enforced by the schema's refine). Strict Zod
+ * rejects any other field (D3). Only the keys present in the body are written,
+ * so a PATCH never clobbers a field the caller didn't mention. RLS filters by
+ * doctor_id; an empty update result is translated into 404.
  *
  * Next.js 16: dynamic route params are async (Promise<{ id: string }>).
  */
@@ -154,12 +158,24 @@ export async function PATCH(
   } = await supabase.auth.getUser();
   if (!user) return errorResponse('unauthenticated', 401);
 
+  // Build the update from only the keys actually present in the body, so a
+  // partial PATCH never clobbers a field the caller didn't mention. The schema
+  // already guarantees at least one key (rejects `{}`).
+  const update: {
+    injured_finger?: typeof body.injured_finger;
+    surgery_date?: typeof body.surgery_date;
+    surgery_note?: typeof body.surgery_note;
+  } = {};
+  if ('injured_finger' in body) update.injured_finger = body.injured_finger;
+  if ('surgery_date' in body) update.surgery_date = body.surgery_date;
+  if ('surgery_note' in body) update.surgery_note = body.surgery_note;
+
   const { data: patient, error } = await supabase
     .from('patients')
-    .update({ injured_finger: body.injured_finger })
+    .update(update)
     .eq('id', id)
     .select(
-      'id, external_id, pathology_code, injured_finger, access_token, started_at, discharged_at, created_at, updated_at',
+      'id, external_id, pathology_code, injured_finger, surgery_date, surgery_note, access_token, started_at, discharged_at, created_at, updated_at',
     )
     .maybeSingle();
 

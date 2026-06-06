@@ -240,6 +240,77 @@ describe('POST /api/doctor/patients (B-06)', () => {
     }
   });
 
+  it('201 persists surgery_date + surgery_note (UX-5)', async () => {
+    handlers['patients:insert'] = [
+      ({ args }) => {
+        const row = (args[0] ?? {}) as {
+          surgery_date?: string | null;
+          surgery_note?: string | null;
+        };
+        expect(row.surgery_date).toBe('2026-05-19');
+        expect(row.surgery_note).toBe('Tenorrafia FDP 5º dedo');
+        return {
+          data: {
+            id: 'p1',
+            doctor_id: authUser!.id,
+            external_id: 'HC-005',
+            pathology_code: 'flexor',
+            injured_finger: 'menique',
+            surgery_date: '2026-05-19',
+            surgery_note: 'Tenorrafia FDP 5º dedo',
+            access_token: 'tok-iq',
+            started_at: '2026-05-20',
+            discharged_at: null,
+            created_at: '2026-05-20T10:00:00Z',
+            updated_at: '2026-05-20T10:00:00Z',
+          },
+          error: null,
+        };
+      },
+    ];
+    const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
+      external_id: 'HC-005',
+      pathology_code: 'flexor',
+      injured_finger: 'menique',
+      surgery_date: '2026-05-19',
+      surgery_note: 'Tenorrafia FDP 5º dedo',
+    });
+    const res = await createPatient(req);
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.patient.surgery_date).toBe('2026-05-19');
+    expect(body.patient.surgery_note).toBe('Tenorrafia FDP 5º dedo');
+  });
+
+  it('400 on invalid calendar surgery_date (UX-5)', async () => {
+    const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
+      external_id: 'HC-006',
+      surgery_date: '2026-13-40',
+    });
+    const res = await createPatient(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('invalid_body');
+  });
+
+  it('400 when surgery_note exceeds 120 chars (UX-5)', async () => {
+    const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
+      external_id: 'HC-007',
+      surgery_note: 'x'.repeat(121),
+    });
+    const res = await createPatient(req);
+    expect(res.status).toBe(400);
+  });
+
+  it('400 on empty-string surgery_note (UX-5)', async () => {
+    const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
+      external_id: 'HC-008',
+      surgery_note: '   ', // trims to empty → rejected
+    });
+    const res = await createPatient(req);
+    expect(res.status).toBe(400);
+  });
+
   it('409 on duplicate external_id (Postgres 23505)', async () => {
     handlers['patients:insert'] = [
       () => ({
@@ -591,6 +662,141 @@ describe('PATCH /api/doctor/patients/:id (UX-4)', () => {
       'http://localhost:3500/api/doctor/patients/p1',
       'PATCH',
       { injured_finger: 'thumb' },
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(400);
+  });
+
+  it('sets surgery_date + surgery_note (UX-5, 200)', async () => {
+    handlers['patients:update'] = [
+      ({ args }) => {
+        const row = (args[0] ?? {}) as Record<string, unknown>;
+        expect(row.surgery_date).toBe('2026-05-19');
+        expect(row.surgery_note).toBe('Tenorrafia FDP 5º dedo');
+        // Only the keys present in the body are written — injured_finger
+        // must NOT be clobbered when it wasn't sent.
+        expect('injured_finger' in row).toBe(false);
+        return {
+          data: {
+            id: 'p1',
+            external_id: 'HC-001',
+            pathology_code: 'flexor',
+            injured_finger: 'menique',
+            surgery_date: '2026-05-19',
+            surgery_note: 'Tenorrafia FDP 5º dedo',
+            access_token: 'tok-abc',
+            started_at: '2026-05-01',
+            discharged_at: null,
+            created_at: '2026-05-01T10:00:00Z',
+            updated_at: '2026-05-20T10:00:00Z',
+          },
+          error: null,
+        };
+      },
+    ];
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      { surgery_date: '2026-05-19', surgery_note: 'Tenorrafia FDP 5º dedo' },
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.patient.surgery_date).toBe('2026-05-19');
+    expect(body.patient.surgery_note).toBe('Tenorrafia FDP 5º dedo');
+  });
+
+  it('clears surgery fields with null (UX-5, 200)', async () => {
+    handlers['patients:update'] = [
+      ({ args }) => {
+        const row = (args[0] ?? {}) as Record<string, unknown>;
+        expect(row.surgery_date).toBeNull();
+        expect(row.surgery_note).toBeNull();
+        return {
+          data: {
+            id: 'p1',
+            external_id: 'HC-001',
+            pathology_code: 'flexor',
+            injured_finger: 'menique',
+            surgery_date: null,
+            surgery_note: null,
+            access_token: 'tok-abc',
+            started_at: '2026-05-01',
+            discharged_at: null,
+            created_at: '2026-05-01T10:00:00Z',
+            updated_at: '2026-05-20T10:00:00Z',
+          },
+          error: null,
+        };
+      },
+    ];
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      { surgery_date: null, surgery_note: null },
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.patient.surgery_date).toBeNull();
+    expect(body.patient.surgery_note).toBeNull();
+  });
+
+  it('combined update: injured_finger + surgery_note in one call (200)', async () => {
+    handlers['patients:update'] = [
+      ({ args }) => {
+        const row = (args[0] ?? {}) as Record<string, unknown>;
+        expect(row.injured_finger).toBe('anular');
+        expect(row.surgery_note).toBe('Tenorrafia');
+        // surgery_date not sent → not written.
+        expect('surgery_date' in row).toBe(false);
+        return {
+          data: {
+            id: 'p1',
+            external_id: 'HC-001',
+            pathology_code: 'flexor',
+            injured_finger: 'anular',
+            surgery_date: null,
+            surgery_note: 'Tenorrafia',
+            access_token: 'tok-abc',
+            started_at: '2026-05-01',
+            discharged_at: null,
+            created_at: '2026-05-01T10:00:00Z',
+            updated_at: '2026-05-20T10:00:00Z',
+          },
+          error: null,
+        };
+      },
+    ];
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      { injured_finger: 'anular', surgery_note: 'Tenorrafia' },
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.patient.injured_finger).toBe('anular');
+    expect(body.patient.surgery_note).toBe('Tenorrafia');
+  });
+
+  it('400 on empty body {} (UX-5, at least one field required)', async () => {
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      {},
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('invalid_body');
+  });
+
+  it('400 on invalid calendar surgery_date (UX-5)', async () => {
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      { surgery_date: '2026-02-30' },
     );
     const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
     expect(res.status).toBe(400);

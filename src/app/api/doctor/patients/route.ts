@@ -43,9 +43,12 @@ export async function POST(request: NextRequest) {
       external_id: body.external_id,
       pathology_code: body.pathology_code ?? null,
       injured_finger: body.injured_finger ?? null,
+      // UX-5: optional clinical-record fields.
+      surgery_date: body.surgery_date ?? null,
+      surgery_note: body.surgery_note ?? null,
     })
     .select(
-      'id, doctor_id, external_id, pathology_code, injured_finger, access_token, started_at, discharged_at, created_at, updated_at',
+      'id, doctor_id, external_id, pathology_code, injured_finger, surgery_date, surgery_note, access_token, started_at, discharged_at, created_at, updated_at',
     )
     .single();
 
@@ -99,7 +102,7 @@ export async function GET(request: NextRequest) {
   let q = supabase
     .from('patients')
     .select(
-      'id, external_id, pathology_code, injured_finger, started_at, discharged_at',
+      'id, external_id, pathology_code, injured_finger, surgery_date, surgery_note, started_at, discharged_at',
     );
 
   if (query.status === 'active') q = q.is('discharged_at', null);
@@ -157,6 +160,9 @@ export async function GET(request: NextRequest) {
       external_id: p.external_id,
       pathology_code: p.pathology_code,
       injured_finger: p.injured_finger,
+      // UX-5: clinical-record fields.
+      surgery_date: p.surgery_date,
+      surgery_note: p.surgery_note,
       started_at: p.started_at,
       discharged_at: p.discharged_at,
       // Backwards-compatible top-level fields (UI today reads these).

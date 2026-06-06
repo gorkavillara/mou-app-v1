@@ -78,6 +78,9 @@ export async function GET(
   const admin = getSupabaseAdmin();
 
   // Resolve patient by token.
+  // UX-5 / data minimisation: surgery_date and surgery_note are deliberately
+  // NOT selected here. The patient-facing view never needs the surgical record,
+  // so we don't fetch or expose it — only the doctor panel reads those fields.
   const { data: patient, error: patientErr } = await admin
     .from('patients')
     .select(

@@ -38,6 +38,8 @@ Seed inicial: 2 filas (los 2 ejercicios de la D4).
 | `external_id` | text | Nº historia clínica O correlativo. Único por doctor. |
 | `pathology_code` | text | Opcional: `flexor`, `extensor`, `otros`. **No** descripciones libres. |
 | `injured_finger` | text NULL | **UX-4 (2026-05-20)**: dedo operado: `pulgar`, `indice`, `medio`, `anular`, `menique`. NULL = no especificado → la sesión mide la media de todos los dedos (comportamiento actual). Valores idénticos a `FingerName` en `src/lib/hand-tracking.ts`. La sesión del paciente lo usa para (a) pintar ese dedo distinto y (b) medir los grados de ESE dedo en vez de la media. |
+| `surgery_date` | date NULL | **UX-5 (2026-05-20)**: fecha de la intervención quirúrgica (p.ej. `2026-05-19`). NULL = no especificada. Petición del cirujano (test Javi 2026-05-20). |
+| `surgery_note` | text NULL | **UX-5 (2026-05-20)**: descriptor quirúrgico breve, jerga clínica (p.ej. `Tenorrafia FDP 5º dedo`). CHECK `char_length <= 120`. El backend lo recorta (trim) y rechaza cadena vacía. NUNCA nombres (D3). NULL = no especificado. **Sólo lo lee el panel del doctor**: la API por token del paciente NO lo expone. |
 | `access_token` | text UNIQUE | Token largo aleatorio para la URL del paciente |
 | `started_at` | date | Fecha de alta del tratamiento |
 | `discharged_at` | date NULL | Si NULL → activo. Si fecha → dado de alta. |

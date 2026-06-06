@@ -166,6 +166,66 @@ describe('GET /api/patient/[token] (B-11)', () => {
     expect(res.headers.get('cache-control')).toBe('no-store');
   });
 
+  it('does NOT expose surgery_date/surgery_note (UX-5 data minimisation)', async () => {
+    handlers['patients:select'] = [
+      ({ selectArgs }) => {
+        // The route must not even SELECT the surgery columns.
+        const cols = String(selectArgs?.[0] ?? '');
+        expect(cols).not.toContain('surgery_date');
+        expect(cols).not.toContain('surgery_note');
+        return {
+          data: {
+            id: 'p1',
+            external_id: 'HC-001',
+            pathology_code: 'flexor',
+            injured_finger: 'menique',
+            started_at: '2026-05-01',
+            discharged_at: null,
+          },
+          error: null,
+        };
+      },
+    ];
+    handlers['prescriptions:select'] = [
+      () => ({
+        data: [
+          {
+            id: 'rx1',
+            exercise_id: 'ex1',
+            sets: 3,
+            reps_per_set: 20,
+            sessions_per_day: 4,
+            duration_days: 14,
+            starts_on: isoPlusDays(-2),
+            exercise: {
+              id: 'ex1',
+              code: 'flexion-pasiva-dedos',
+              name: 'Flexión pasiva',
+              description: null,
+              animation_url: null,
+              tracked_joints: ['MCP'],
+              target_finger: 'all',
+            },
+          },
+        ],
+        error: null,
+      }),
+    ];
+    handlers['sessions:select'] = [() => ({ data: null, error: null, count: 0 })];
+
+    const req = jsonRequest(
+      `http://localhost:3500/api/patient/${VALID_TOKEN}`,
+      'GET',
+    );
+    const res = await getPatient(req, {
+      params: Promise.resolve({ token: VALID_TOKEN }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.patient).not.toHaveProperty('surgery_date');
+    expect(body.patient).not.toHaveProperty('surgery_note');
+  });
+
   it('404 on bad/short token', async () => {
     const shortToken = 'abc';
     const req = jsonRequest(

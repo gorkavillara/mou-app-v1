@@ -16,6 +16,40 @@ export const injuredFingerSchema = z.enum([
 export type InjuredFinger = z.infer<typeof injuredFingerSchema>;
 
 /**
+ * UX-5 (2026-05-20): a strict YYYY-MM-DD date that must also be a real calendar
+ * date (rejects '2026-13-40'). The progression query uses a regex-only `isoDate`
+ * below (range-checked at the route), but for the surgery_date we additionally
+ * validate the calendar so an impossible date never reaches Postgres as a 500.
+ */
+const isoCalendarDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, { error: 'must be YYYY-MM-DD' })
+  .refine(
+    (s) => {
+      const [y, m, d] = s.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      return (
+        dt.getUTCFullYear() === y &&
+        dt.getUTCMonth() === m - 1 &&
+        dt.getUTCDate() === d
+      );
+    },
+    { error: 'must be a valid calendar date' },
+  );
+
+/**
+ * UX-5: free-text surgical descriptor (e.g. "Tenorrafia FDP 5º dedo"). Trimmed,
+ * 1..120 chars. Empty string is NOT accepted (omit the field instead). D3: the
+ * UI instructs the surgeon not to write names; the 120-char bound keeps it to
+ * jargon and the patient-token API never exposes it.
+ */
+const surgeryNoteSchema = z
+  .string()
+  .trim()
+  .min(1, { error: 'surgery_note must not be empty' })
+  .max(120, { error: 'surgery_note too long (max 120)' });
+
+/**
  * UX-6 (2026-05-20): the surgeon tried "PRUEBA 1" and it was rejected. We allow
  * single spaces BETWEEN words (no leading/trailing spaces, no double spaces).
  * Allowed token chars stay conservative: letters, digits, `_`, `-`, `/`.
@@ -38,29 +72,45 @@ const externalIdSchema = z
  *
  * UX-4: `injured_finger` is optional on create; absence is fine. We do NOT
  * accept `null` here (just omit it) — clearing happens via PATCH.
+ *
+ * UX-5: `surgery_date` (valid calendar YYYY-MM-DD) and `surgery_note` (trimmed
+ * 1..120 chars) are optional on create. Same rule: omit rather than send null;
+ * clearing happens via PATCH.
  */
 export const createPatientSchema = z
   .object({
     external_id: externalIdSchema,
     pathology_code: z.enum(['flexor', 'extensor', 'otros']).optional(),
     injured_finger: injuredFingerSchema.optional(),
+    surgery_date: isoCalendarDate.optional(),
+    surgery_note: surgeryNoteSchema.optional(),
   })
   .strict();
 
 export type CreatePatientInput = z.infer<typeof createPatientSchema>;
 
 /**
- * Body schema for PATCH /api/doctor/patients/:id (UX-4).
+ * Body schema for PATCH /api/doctor/patients/:id (UX-4 + UX-5).
  *
- * Exactly one field for now: `injured_finger`. `null` clears it (NULL =
- * measure the all-fingers average, current behaviour). `.strict()` rejects any
- * other field, including PII (D3).
+ * The body may carry any NON-EMPTY subset of the clinical-record fields:
+ *   - `injured_finger`: finger | null  (null clears → all-fingers average)
+ *   - `surgery_date`:   YYYY-MM-DD | null (UX-5; null clears)
+ *   - `surgery_note`:   1..120 chars | null (UX-5; null clears)
+ *
+ * Every field is `.optional()` so partial updates work, but `.refine` rejects
+ * `{}` (at least one key required) — a no-op PATCH is a client mistake (400).
+ * `.strict()` still rejects any other field, including PII (D3).
  */
 export const patchPatientSchema = z
   .object({
-    injured_finger: injuredFingerSchema.nullable(),
+    injured_finger: injuredFingerSchema.nullable().optional(),
+    surgery_date: isoCalendarDate.nullable().optional(),
+    surgery_note: surgeryNoteSchema.nullable().optional(),
   })
-  .strict();
+  .strict()
+  .refine((body) => Object.keys(body).length > 0, {
+    error: 'at least one field is required',
+  });
 
 export type PatchPatientInput = z.infer<typeof patchPatientSchema>;
 

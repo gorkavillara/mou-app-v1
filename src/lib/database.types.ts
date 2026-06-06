@@ -57,6 +57,9 @@ export interface Database {
           external_id: string;
           pathology_code: PathologyCode | null;
           injured_finger: InjuredFinger | null;
+          // UX-5: surgical record (date + bounded free-text descriptor).
+          surgery_date: string | null;
+          surgery_note: string | null;
           access_token: string;
           started_at: string;
           discharged_at: string | null;
@@ -69,6 +72,9 @@ export interface Database {
           external_id: string;
           pathology_code?: PathologyCode | null;
           injured_finger?: InjuredFinger | null;
+          // UX-5: surgical record (date + bounded free-text descriptor).
+          surgery_date?: string | null;
+          surgery_note?: string | null;
           access_token?: string;
           started_at?: string;
           discharged_at?: string | null;
