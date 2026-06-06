@@ -35,38 +35,51 @@ export class DoctorListPage extends BasePage {
   }
 }
 
-export type InjuredFingerValue = 'pulgar' | 'indice' | 'medio' | 'anular' | 'menique';
+export type FingerValue = 'pulgar' | 'indice' | 'medio' | 'anular' | 'menique';
+export type FingerState = 'normal' | 'injured' | 'amputated';
 
 export class NewPatientDialogPO {
   readonly dialog: Locator;
   readonly externalIdInput: Locator;
   readonly pathologySelect: Locator;
-  readonly injuredFingerSelect: Locator;
+  readonly fingerStatusPicker: Locator;
   readonly surgeryDateInput: Locator;
   readonly surgeryNoteInput: Locator;
   readonly submitButton: Locator;
   readonly errorBox: Locator;
+  private readonly page: Page;
 
   constructor(page: Page) {
+    this.page = page;
     this.dialog = page.getByRole('dialog');
     this.externalIdInput = page.getByLabel('ID del paciente');
     this.pathologySelect = page.getByLabel(/Patolog/i);
-    this.injuredFingerSelect = page.getByLabel(/Dedo lesionado/i);
+    this.fingerStatusPicker = page.getByTestId('finger-status-picker');
     this.surgeryDateInput = page.getByLabel(/Fecha de intervención/i);
     this.surgeryNoteInput = page.getByLabel(/^Cirugía/i);
     this.submitButton = page.getByRole('button', { name: /Crear paciente/i });
     this.errorBox = this.dialog.locator('div.bg-red-50');
   }
 
+  /** FB-1 — set a finger's N/L/A state in the per-finger picker. */
+  async setFingerState(finger: FingerValue, state: FingerState): Promise<void> {
+    await this.page.getByTestId(`finger-${finger}-${state}`).click();
+  }
+
   async fillAndSubmit(
     externalId: string,
     pathology?: 'flexor' | 'extensor' | 'otros',
-    injuredFinger?: InjuredFingerValue,
+    fingers?: { injured?: FingerValue[]; amputated?: FingerValue[] },
     surgery?: { date?: string; note?: string },
   ): Promise<void> {
     await this.externalIdInput.fill(externalId);
     if (pathology) await this.pathologySelect.selectOption(pathology);
-    if (injuredFinger) await this.injuredFingerSelect.selectOption(injuredFinger);
+    if (fingers?.injured) {
+      for (const f of fingers.injured) await this.setFingerState(f, 'injured');
+    }
+    if (fingers?.amputated) {
+      for (const f of fingers.amputated) await this.setFingerState(f, 'amputated');
+    }
     if (surgery?.date) await this.surgeryDateInput.fill(surgery.date);
     if (surgery?.note) await this.surgeryNoteInput.fill(surgery.note);
     await this.submitButton.click();

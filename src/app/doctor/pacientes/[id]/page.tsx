@@ -20,7 +20,7 @@ import {
 } from '@/lib/doctor-api';
 import { AdherenceBar } from '@/components/doctor/AdherenceBar';
 import { DischargeButton } from '@/components/doctor/DischargeButton';
-import { InjuredFingerControl } from '@/components/doctor/InjuredFingerControl';
+import { FingerStatusControl } from '@/components/doctor/FingerStatusControl';
 import { SurgeryControl } from '@/components/doctor/SurgeryControl';
 import { NewPrescriptionDialog } from '@/components/doctor/NewPrescriptionDialog';
 import { CopyUrlButton, PrintButton } from '@/components/doctor/PatientAccessActions';
@@ -68,7 +68,8 @@ export default async function PatientDetailPage({ params }: { params: Params }) 
           days={days}
           discharged={discharged}
           patientId={patient.id}
-          injuredFinger={patient.injured_finger}
+          injuredFingers={patient.injured_fingers ?? []}
+          amputatedFingers={patient.amputated_fingers ?? []}
           surgeryDate={patient.surgery_date}
           surgeryNote={patient.surgery_note}
         />
@@ -114,7 +115,8 @@ function Header({
   days,
   discharged,
   patientId,
-  injuredFinger,
+  injuredFingers,
+  amputatedFingers,
   surgeryDate,
   surgeryNote,
 }: {
@@ -122,7 +124,8 @@ function Header({
   days: number;
   discharged: boolean;
   patientId: string;
-  injuredFinger: PatientDetail['injured_finger'];
+  injuredFingers: NonNullable<PatientDetail['injured_fingers']>;
+  amputatedFingers: NonNullable<PatientDetail['amputated_fingers']>;
   surgeryDate: PatientDetail['surgery_date'];
   surgeryNote: PatientDetail['surgery_note'];
 }) {
@@ -144,9 +147,14 @@ function Header({
         <p className="text-sm text-gray-500">
           {days === 0 ? 'alta hoy' : `día ${days} de tratamiento`}
         </p>
-        {/* UX-4 — operated finger: badge when set + inline select to change it. */}
+        {/* FB-1 — affected fingers (lesionado / amputado): badge summary when */}
+        {/* collapsed + inline N/L/A editor. */}
         <div className="pt-1">
-          <InjuredFingerControl patientId={patientId} injuredFinger={injuredFinger} />
+          <FingerStatusControl
+            patientId={patientId}
+            injuredFingers={injuredFingers}
+            amputatedFingers={amputatedFingers}
+          />
         </div>
         {/* Round 3 — intervention date + surgical descriptor (display + inline edit). */}
         <div className="pt-1">

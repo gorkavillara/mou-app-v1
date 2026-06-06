@@ -35,14 +35,26 @@ export class DoctorDetailPage extends BasePage {
     return this.page.getByRole('button', { name: 'Finalizar rehabilitación' });
   }
 
-  /** UX-4 — operated-finger badge in the header ("Dedo: Meñique"). */
-  injuredFingerBadge(): Locator {
-    return this.page.getByTestId('injured-finger-badge');
+  /** FB-1 — collapsed badge summary of affected fingers ("Lesionados: …"). */
+  fingerStatusSummary(): Locator {
+    return this.page.getByTestId('finger-status-summary');
   }
 
-  /** UX-4 — inline select that PATCHes the operated finger. */
-  injuredFingerSelect(): Locator {
-    return this.page.getByTestId('injured-finger-select');
+  /** FB-1 — pencil affordance opening the inline N/L/A editor. */
+  fingerStatusEditButton(): Locator {
+    return this.page.getByTestId('finger-status-edit');
+  }
+
+  fingerStatusSaveButton(): Locator {
+    return this.page.getByTestId('finger-status-save');
+  }
+
+  /** FB-1 — click a finger's N/L/A segment in the inline editor. */
+  async setFingerState(
+    finger: 'pulgar' | 'indice' | 'medio' | 'anular' | 'menique',
+    state: 'normal' | 'injured' | 'amputated',
+  ): Promise<void> {
+    await this.page.getByTestId(`finger-${finger}-${state}`).click();
   }
 
   /** Round 3 — compact "IQ d/M/yy · nota" line in the header (when set). */

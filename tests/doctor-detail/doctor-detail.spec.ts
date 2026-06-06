@@ -115,7 +115,7 @@ test.describe('Doctor patient detail', () => {
   );
 
   test(
-    'create with an injured finger shows the badge and can be changed inline',
+    'create with multiple finger statuses shows the summary and can be edited inline',
     { tag: ['@high', '@e2e', '@doctor-detail', '@DOCTOR-DETAIL-E2E-005'] },
     async ({ page }, testInfo) => {
       const externalId = generatePatientId('FINGER');
@@ -123,24 +123,32 @@ test.describe('Doctor patient detail', () => {
       await list.goto();
       await list.newPatientButton.click();
       const dialog = new NewPatientDialogPO(page);
-      await dialog.fillAndSubmit(externalId, undefined, 'menique');
+      // FB-1: mark Meñique = Lesionado and Índice = Amputado in the dialog.
+      await dialog.fillAndSubmit(externalId, undefined, {
+        injured: ['menique'],
+        amputated: ['indice'],
+      });
       await page.waitForURL(/\/doctor\/pacientes\/[0-9a-f-]+/);
 
       const detail = new DoctorDetailPage(page);
       await detail.expectLoaded(externalId);
 
-      // Badge reflects the finger chosen at creation.
-      await expect(detail.injuredFingerBadge()).toContainText('Meñique');
+      // Summary shows both groups (chosen at creation).
+      await expect(detail.fingerStatusSummary()).toContainText('Lesionado: Meñique');
+      await expect(detail.fingerStatusSummary()).toContainText('Amputado: Índice');
       await detail.snap(testInfo, 'patient-detail-injured-finger');
 
-      // Change it inline (PATCH) → badge updates after the refresh.
-      await detail.injuredFingerSelect().selectOption('indice');
-      await expect(detail.injuredFingerBadge()).toContainText('Índice');
+      // Edit: add Anular = Lesionado, then save (PATCH full replacement).
+      await detail.fingerStatusEditButton().click();
+      await detail.setFingerState('anular', 'injured');
+      await detail.fingerStatusSaveButton().click();
+      await expect(detail.fingerStatusSummary()).toContainText('Meñique');
+      await expect(detail.fingerStatusSummary()).toContainText('Anular');
 
       // Persists across a reload.
       await page.reload();
-      await expect(detail.injuredFingerBadge()).toContainText('Índice');
-      await expect(detail.injuredFingerSelect()).toHaveValue('indice');
+      await expect(detail.fingerStatusSummary()).toContainText('Lesionados: Meñique, Anular');
+      await expect(detail.fingerStatusSummary()).toContainText('Amputado: Índice');
     },
   );
 

@@ -4,7 +4,8 @@ import { X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-import type { InjuredFinger } from '@/lib/database.types';
+import type { FingerName } from '@/lib/database.types';
+import { FingerStatusPicker } from './FingerStatusPicker';
 
 type Props = {
   open: boolean;
@@ -15,22 +16,16 @@ type Props = {
 // widened the same way) — the surgeon wanted to type e.g. "PRUEBA 1".
 const ID_PATTERN = /^[A-Za-z0-9_\-/]+( [A-Za-z0-9_\-/]+)*$/;
 
-// UX-4: operated finger options (capitalized Spanish labels).
-const INJURED_FINGER_OPTIONS: { value: InjuredFinger; label: string }[] = [
-  { value: 'pulgar', label: 'Pulgar' },
-  { value: 'indice', label: 'Índice' },
-  { value: 'medio', label: 'Medio' },
-  { value: 'anular', label: 'Anular' },
-  { value: 'menique', label: 'Meñique' },
-];
-
 export function NewPatientDialog({ open, onClose }: Props) {
   const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [externalId, setExternalId] = useState('');
   const [pathology, setPathology] = useState<'' | 'flexor' | 'extensor' | 'otros'>('');
-  const [injuredFinger, setInjuredFinger] = useState<'' | InjuredFinger>('');
+  // FB-1: per-finger status, modelled as two arrays mirroring the backend
+  // contract (`injured_fingers` / `amputated_fingers`). Empty = all Normal.
+  const [injuredFingers, setInjuredFingers] = useState<FingerName[]>([]);
+  const [amputatedFingers, setAmputatedFingers] = useState<FingerName[]>([]);
   // Round 3: intervention date + short surgical descriptor (both optional).
   const [surgeryDate, setSurgeryDate] = useState('');
   const [surgeryNote, setSurgeryNote] = useState('');
@@ -51,7 +46,8 @@ export function NewPatientDialog({ open, onClose }: Props) {
   function reset() {
     setExternalId('');
     setPathology('');
-    setInjuredFinger('');
+    setInjuredFingers([]);
+    setAmputatedFingers([]);
     setSurgeryDate('');
     setSurgeryNote('');
     setError(null);
@@ -82,15 +78,17 @@ export function NewPatientDialog({ open, onClose }: Props) {
       const body: {
         external_id: string;
         pathology_code?: 'flexor' | 'extensor' | 'otros';
-        injured_finger?: InjuredFinger;
+        injured_fingers?: FingerName[];
+        amputated_fingers?: FingerName[];
         surgery_date?: string;
         surgery_note?: string;
       } = {
         external_id: id,
       };
       if (pathology) body.pathology_code = pathology;
-      // UX-4: only include when explicitly chosen (never send null on create).
-      if (injuredFinger) body.injured_finger = injuredFinger;
+      // FB-1: only include each array when non-empty (omit on create otherwise).
+      if (injuredFingers.length > 0) body.injured_fingers = injuredFingers;
+      if (amputatedFingers.length > 0) body.amputated_fingers = amputatedFingers;
       // Round 3: include only when filled (date non-empty; note trimmed non-empty).
       if (surgeryDate) body.surgery_date = surgeryDate;
       const note = surgeryNote.trim();
@@ -189,22 +187,18 @@ export function NewPatientDialog({ open, onClose }: Props) {
           </div>
 
           <div className="space-y-1.5">
-            <label htmlFor="injured_finger" className="block text-[13px] font-medium text-gray-500 ml-1">
-              Dedo lesionado (opcional)
-            </label>
-            <select
-              id="injured_finger"
-              value={injuredFinger}
-              onChange={(e) => setInjuredFinger(e.target.value as '' | InjuredFinger)}
-              className="w-full h-11 px-3 bg-white border border-[#E5E5EA] rounded-[10px] text-[17px] text-gray-900 focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF] focus:outline-none"
-            >
-              <option value="">Sin especificar</option>
-              {INJURED_FINGER_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
+            <span className="block text-[13px] font-medium text-gray-500 ml-1">
+              Dedos afectados (opcional)
+            </span>
+            <FingerStatusPicker
+              injured={injuredFingers}
+              amputated={amputatedFingers}
+              disabled={submitting}
+              onChange={({ injured, amputated }) => {
+                setInjuredFingers(injured);
+                setAmputatedFingers(amputated);
+              }}
+            />
           </div>
 
           <div className="space-y-1.5">

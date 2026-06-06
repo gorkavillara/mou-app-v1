@@ -167,23 +167,54 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   const targetReps = sets * repsPerSet;
   const trackedJoints = exercise.tracked_joints;
 
-  // UX-4: if the patient has an operated finger, the measurement is driven by
-  // THAT finger (and `drawHand` paints it orange). Otherwise we fall back to
-  // the exercise's `target_finger` (e.g. the long fingers for "all").
-  const injuredFinger = patient.injured_finger;
-  const driverFinger: FingerName | 'all' =
-    injuredFinger ?? pickFingerForRep(exercise.target_finger);
-  const driverFingerLabel =
-    driverFinger === 'all' ? null : FINGER_LABELS[driverFinger];
-
-  // UX-4: finger status map for `drawHand`. The operated finger is `injured`
-  // (orange overlay); everything else stays `normal`. Memoized so the rAF loop
-  // closure (`renderFrame`) keeps a stable identity across renders.
-  const fingerStatus: FingerStatusMap = useMemo(
-    () =>
-      injuredFinger ? { ...ALL_NORMAL, [injuredFinger]: 'injured' } : ALL_NORMAL,
-    [injuredFinger],
+  // FB-1: measurement driver. If the patient has ≥1 injured finger, the
+  // measurement is the AVERAGE across all injured fingers (and `drawHand`
+  // paints them orange). Otherwise we fall back to the exercise's
+  // `target_finger` selection (e.g. the long fingers for "all"), EXCLUDING any
+  // amputated finger. Amputated fingers are NEVER part of the driver set.
+  const injuredFingers = useMemo(
+    () => patient.injured_fingers ?? [],
+    [patient.injured_fingers],
   );
+  const amputatedFingers = useMemo(
+    () => patient.amputated_fingers ?? [],
+    [patient.amputated_fingers],
+  );
+
+  // The set of fingers whose angles drive the rep counter + per-joint peaks.
+  // - ≥1 injured → exactly those fingers.
+  // - else → the target_finger selection minus amputated. For "all" this is
+  //   the long fingers (thumb stays out, as today); a single named target that
+  //   happens to be amputated yields an empty set (no measurable finger).
+  const driverFingerNames: FingerName[] = useMemo(() => {
+    if (injuredFingers.length > 0) return injuredFingers;
+    const target = pickFingerForRep(exercise.target_finger);
+    const base: FingerName[] =
+      target === 'all'
+        ? FINGERS.map((f) => f.name).filter((n) => n !== 'pulgar')
+        : [target];
+    return base.filter((n) => !amputatedFingers.includes(n));
+  }, [injuredFingers, amputatedFingers, exercise.target_finger]);
+
+  // Label shown while running: explicit when we're measuring a specific set of
+  // injured fingers, null when falling back to the whole "all" selection (so
+  // we don't clutter the HUD with every long finger).
+  const measuringLabel =
+    injuredFingers.length > 0
+      ? injuredFingers.map((f) => FINGER_LABELS[f]).join(', ')
+      : driverFingerNames.length === 1
+        ? FINGER_LABELS[driverFingerNames[0]]
+        : null;
+
+  // FB-1: finger status map for `drawHand`. Injured → orange, amputated →
+  // dashed gray, rest normal. Memoized so the rAF loop closure keeps a stable
+  // identity across renders.
+  const fingerStatus: FingerStatusMap = useMemo(() => {
+    const map: FingerStatusMap = { ...ALL_NORMAL };
+    for (const f of injuredFingers) map[f] = 'injured';
+    for (const f of amputatedFingers) map[f] = 'amputated';
+    return map;
+  }, [injuredFingers, amputatedFingers]);
 
   // UX-2: spelled-out dose for the intro (matches PatientHome wording).
   const doseSentence = (() => {
@@ -412,11 +443,12 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
 
       const allRaw: FingerJointAngles = calculateAllJointAngles(landmarks);
 
-      // Decide which fingers contribute to the rep driver and to per-joint peaks.
-      const fingers =
-        driverFinger === 'all'
-          ? FINGERS.filter((f) => f.name !== 'pulgar') // long fingers
-          : FINGERS.filter((f) => f.name === driverFinger);
+      // FB-1: the fingers contributing to the rep driver + per-joint peaks are
+      // the resolved driver set (injured fingers, or the target selection minus
+      // amputated). If empty (e.g. the only target finger is amputated) there is
+      // nothing to measure this frame.
+      const fingers = FINGERS.filter((f) => driverFingerNames.includes(f.name));
+      if (fingers.length === 0) return;
 
       // Collect normalized angles per tracked joint.
       const perJointSamples: Partial<Record<TrackedJoint, number[]>> = {};
@@ -547,7 +579,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     // finishSession / startRest defined below; eslint disabled for the same
     // reason as above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [driverFinger, repsPerSet, sets, trackedJoints, showToast],
+    [driverFingerNames, repsPerSet, sets, trackedJoints, showToast],
   );
 
   const renderFrame = useCallback(() => {
@@ -973,9 +1005,9 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
             >
               {doseSentence}
             </p>
-            {driverFingerLabel ? (
+            {measuringLabel ? (
               <p className="mt-1 text-[15px] text-gray-600">
-                Vamos a medir tu <span className="font-semibold">{driverFingerLabel.toLowerCase()}</span>.
+                Vamos a medir tu <span className="font-semibold">{measuringLabel.toLowerCase()}</span>.
               </p>
             ) : null}
             {exercise.description ? (
@@ -1170,12 +1202,12 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
                 >
                   Serie {currentSet} de {sets}
                 </div>
-                {driverFingerLabel ? (
+                {measuringLabel ? (
                   <div
                     data-testid="measuring-finger"
                     className="mt-1 text-[12px] text-[#FF9F0A]"
                   >
-                    Midiendo: {driverFingerLabel}
+                    Midiendo: {measuringLabel}
                   </div>
                 ) : null}
               </div>
@@ -1296,7 +1328,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
         <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-[#34C759]/10 text-[#34C759]">
           <CheckCircle2 size={36} strokeWidth={2.2} aria-hidden />
         </div>
-        <h1 className="mt-6 text-[28px] font-semibold tracking-tight">
+        <h1 className="mt-6 text-[28px] font-semibold tracking-tight text-gray-900">
           Sesión terminada
         </h1>
         <p className="mt-2 text-[15px] text-gray-600">
@@ -1305,7 +1337,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
 
         {summary ? (
           <section className="mt-8 rounded-2xl border border-gray-100 bg-white p-5 text-left">
-            <h2 className="text-[15px] font-semibold">Pico medio por articulación</h2>
+            <h2 className="text-[15px] font-semibold text-gray-900">Pico medio por articulación</h2>
             <ul className="mt-3 space-y-2 text-[14px] text-gray-700">
               {trackedJoints.map((joint) => {
                 const slot = summary.perJoint[joint];
