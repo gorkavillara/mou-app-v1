@@ -26,6 +26,12 @@ mou-board-version: 1
 
 ## ✅ Hecho
 
+- [x] **UX-1** [P1] Copy "3 series de 20 repeticiones, 4 veces al día" en home e intro (plural-aware) ✓ 2026-05-20 #frontend
+- [x] **UX-2** [P1] Sesión por series: fase `resting`, "Repetición X de N · Serie Y de Z", descanso entre series ✓ 2026-05-20 #frontend
+- [x] **UX-4** [P1] Dedo lesionado: `patients.injured_finger` + PATCH + selector en alta + control inline en ficha + driver de medición + naranja en sesión ✓ 2026-05-20 #backend #frontend
+- [x] **UX-6** [P2] Espacios internos en el ID de paciente (regex backend = frontend) ✓ 2026-05-20 #backend #frontend
+- [x] **CLÍNICA-1a** [P1] Seed "Flexión activa de dedos" (protocolo flexor semana 3+) ✓ 2026-05-20 #backend
+- [x] **REVIEW-FIX** Closure obsoleto en `finishSession` (rAF pipeline): guard por `phaseRef` — sin esto la sesión con cámara real nunca llegaba a `done` ni POSTeaba ✓ 2026-05-20 #frontend
 - [x] **BUG-1** [P0] Cámara en negro 1ª sesión: fase `preparing`, video pre-montado, getUserMedia+MediaPipe en paralelo, watchdog 4s + "Reintentar" ✓ 2026-05-20 #frontend
 - [x] **BUG-2** [P0] Botón "Terminar" bajo el notch: safe-area inset + HUD en 2 filas ✓ 2026-05-20 #frontend
 - [x] **BUG-3** [P1] Coaching no disparaba: `updateRepCoaching` estaba importado pero sin llamar — cableado al cierre de rep con warm-up 3 reps ✓ 2026-05-20 #frontend #ia
