@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Camera, CheckCircle2, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Camera, CheckCircle2, Loader2, RotateCcw } from 'lucide-react';
 import {
   FINGERS,
   JOINT_CALIBRATION,
@@ -33,10 +33,27 @@ import type {
 /**
  * F-10 client component.
  *
- * Three-phase state machine:
- *   intro    → camera permission / "Empezar"
- *   running  → MediaPipe loop, angle overlay, rep counter
- *   done     → summary + POST to /api/patient/[token]/sessions
+ * Four-phase state machine:
+ *   intro     → camera permission / "Empezar"
+ *   preparing → camera being acquired + model loading, spinner + live <video>
+ *   running   → MediaPipe loop, angle overlay, rep counter
+ *   done      → summary + POST to /api/patient/[token]/sessions
+ *
+ * BUG-1 (surgeon, 2026-05-20): on the FIRST session every time, on two
+ * different phones, the screen went black and the patient had to exit and
+ * re-enter for the camera to show. Root cause: the <video> element only
+ * existed in the `running` phase, so the gesture handler requested the stream,
+ * THEN flipped to `running`, THEN waited a rAF for the element to mount before
+ * assigning `srcObject` + calling `play()` — by which point the iOS Safari
+ * user-gesture context was already gone, so `play()` silently rejected and the
+ * black <video> never started. MediaPipe was also loaded AFTER the camera,
+ * serializing seconds of WASM fetch behind a dead-looking screen.
+ *
+ * The fix: a dedicated `preparing` phase that renders the <video> (and a
+ * spinner) BEFORE we touch the camera, assigns the stream via a callback ref so
+ * the element is guaranteed to exist, calls `play()` immediately, retries once
+ * on `loadedmetadata`, loads the model in PARALLEL, and runs a ~4s watchdog
+ * that surfaces an in-place "Reintentar" button (no exit/re-enter needed).
  *
  * The detection loop uses MediaPipe's HandLandmarker (CDN), running 21 landmarks
  * per frame. Reps are driven by the average normalized MCP across the tracked
@@ -49,7 +66,11 @@ import type {
  * `quality_flag: 'low_visibility'` so the doctor knows not to trust the peaks.
  */
 
-type Phase = 'intro' | 'running' | 'done';
+type Phase = 'intro' | 'preparing' | 'running' | 'done';
+
+// Watchdog: if no decodable video frame arrives within this window we assume
+// the camera is stuck (the surgeon's black-screen case) and offer a retry.
+const CAMERA_WATCHDOG_MS = 4000;
 
 type Props = {
   token: string;
@@ -134,6 +155,9 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
 
   const [phase, setPhase] = useState<Phase>('intro');
   const [permissionError, setPermissionError] = useState<string | null>(null);
+  // BUG-1 — watchdog flag. When true, the `preparing` phase swaps its spinner
+  // for an in-place "Reintentar" button without leaving the session.
+  const [cameraStalled, setCameraStalled] = useState(false);
   const [repCount, setRepCount] = useState(0);
   // IA-11 — expected hand for this session. We have no DB column yet that
   // tells us which side was operated; the intro phase exposes a toggle so the
@@ -161,6 +185,14 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
   const startedAtRef = useRef<string | null>(null);
+  // BUG-1 — watchdog timer + acquisition generation. The generation is bumped
+  // on every (re)acquire so a stale async chain (slow getUserMedia / model
+  // load from a previous attempt) can detect it lost the race and bail out.
+  const watchdogRef = useRef<number | null>(null);
+  const acquireGenRef = useRef(0);
+  // Set once the rAF loop has rendered a real frame. The watchdog reads this
+  // to decide whether the camera is actually alive.
+  const firstFrameRef = useRef(false);
 
   // Rep tracking ref state (not driving renders directly — we sample to UI refs).
   const repCountRef = useRef(0);
@@ -246,6 +278,10 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   const teardown = useCallback(() => {
     stopLoop();
     stopStream();
+    if (watchdogRef.current !== null) {
+      window.clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+    }
     try {
       landmarkerRef.current?.close?.();
     } catch {
@@ -397,6 +433,26 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
         repCountRef.current += 1;
         setRepCount(repCountRef.current);
 
+        // BUG-3 — rep coaching wiring. Feed the just-completed rep's flexion
+        // peak ON THE DRIVER JOINT (normalized clinical degrees, the same
+        // scale `updateRepCoaching`'s threshold is expressed in) into the
+        // coaching state machine. After a warm-up grace of the first 3 reps,
+        // if the helper returns a `push_more` suggestion we surface the toast.
+        // Previously `updateRepCoaching` was imported but never invoked, so the
+        // surgeon never saw any coaching ("NO SALE NADA DE AVISOS").
+        const completedPeakFlex = completed.perJoint[driverJoint]?.peakFlex ?? 0;
+        const REP_COACHING_GRACE = 3;
+        if (repCountRef.current > REP_COACHING_GRACE) {
+          const { state: nextCoaching, suggestion } = updateRepCoaching(
+            repCoachingRef.current,
+            { peakFlexion: completedPeakFlex },
+          );
+          repCoachingRef.current = nextCoaching;
+          if (suggestion === 'push_more') {
+            showToast('Intenta llegar un poco más lejos en cada repetición 💪', 3500);
+          }
+        }
+
         // Reset rolling rep record.
         currentRepRef.current = {
           rep_index: repCountRef.current,
@@ -417,7 +473,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     },
     // finishSession defined below; eslint disabled for the same reason as above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [driverFinger, targetReps, trackedJoints],
+    [driverFinger, targetReps, trackedJoints, showToast],
   );
 
   const renderFrame = useCallback(() => {
@@ -432,6 +488,17 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     if (video.readyState < 2) {
       scheduleNextFrame();
       return;
+    }
+
+    // BUG-1 — first decodable frame seen: camera is alive, leave `preparing`.
+    if (!firstFrameRef.current) {
+      firstFrameRef.current = true;
+      if (watchdogRef.current !== null) {
+        window.clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
+      setCameraStalled(false);
+      setPhase('running');
     }
 
     const result = lm.detectForVideo(video, performance.now());
@@ -529,7 +596,12 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
           rep_index: r.rep_index,
           joint,
           max_flexion_deg: slot.peakFlex || null,
-          max_extension_deg: slot.peakExt || null,
+          // peakExt is kept as a positive magnitude for the UI, but the DB
+          // contract stores extension as a SIGNED NEGATIVE value: the B-14
+          // aggregation (patient_progression) takes min(max_extension_deg)
+          // to find the deepest extension excursion. Persisting a positive
+          // magnitude would invert that ranking (BUG-4 follow-up, 2026-05-20).
+          max_extension_deg: slot.peakExt ? -slot.peakExt : null,
           quality_flag: lowVisibility ? 'low_visibility' : 'clean',
         });
       }
@@ -566,105 +638,142 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     }
   }, [prescription.id, targetReps, token, trackedJoints]);
 
-  const startSession = useCallback(async () => {
-    setPermissionError(null);
-
-    // 1. Camera.
+  // BUG-1 — load the MediaPipe HandLandmarker (GPU, then CPU fallback). Pure
+  // async; the camera path runs in parallel with this.
+  const loadLandmarker = useCallback(async (): Promise<HandLandmarkerInstance> => {
+    const vision = await import('@mediapipe/tasks-vision');
+    const fileset = await vision.FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_URL);
+    const make = (delegate: 'GPU' | 'CPU') =>
+      vision.HandLandmarker.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: HAND_LANDMARKER_MODEL_URL, delegate },
+        numHands: 1,
+        runningMode: 'VIDEO',
+      }) as unknown as Promise<HandLandmarkerInstance>;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      return await make('GPU');
+    } catch (err) {
+      console.error('[ExerciseSession] MediaPipe GPU init failed, trying CPU', err);
+      return await make('CPU');
+    }
+  }, []);
+
+  // BUG-1 — attach a stream to the <video> and start playback inside (or
+  // synchronously chained from) the user-gesture stack. Retries `play()` once
+  // on the next `loadedmetadata` if the first attempt rejects (iOS Safari).
+  const attachAndPlay = useCallback((video: HTMLVideoElement, stream: MediaStream) => {
+    video.srcObject = stream;
+    video.muted = true;
+    video.playsInline = true;
+    const tryPlay = () => video.play().catch(() => undefined);
+    void tryPlay().then(() => {
+      if (video.readyState < 2) {
+        const onMeta = () => {
+          video.removeEventListener('loadedmetadata', onMeta);
+          void tryPlay();
+        };
+        video.addEventListener('loadedmetadata', onMeta);
+      }
+    });
+  }, []);
+
+  // BUG-1 — single acquisition routine used by both the initial "Empezar" tap
+  // and the in-place "Reintentar" button. Cleans up any previous stream first,
+  // requests the camera, attaches it to the already-mounted <video>, loads the
+  // model in parallel, and arms the watchdog. The phase flip to `running`
+  // happens in `renderFrame` once a real frame is decoded.
+  const acquireCamera = useCallback(async () => {
+    const gen = (acquireGenRef.current += 1);
+    setPermissionError(null);
+    setCameraStalled(false);
+    firstFrameRef.current = false;
+
+    // Clean up any prior attempt (stop old tracks before re-acquiring).
+    stopLoop();
+    stopStream();
+    if (watchdogRef.current !== null) {
+      window.clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+    }
+
+    // Arm the watchdog: if no frame has rendered within the window, offer retry.
+    watchdogRef.current = window.setTimeout(() => {
+      if (acquireGenRef.current === gen && !firstFrameRef.current) {
+        setCameraStalled(true);
+      }
+    }, CAMERA_WATCHDOG_MS);
+
+    // Kick off the model load in parallel with the camera request.
+    const landmarkerPromise = loadLandmarker();
+
+    // Request the camera (the user gesture is the tap that called us).
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'user' },
         audio: false,
       });
-      streamRef.current = stream;
     } catch (err) {
+      if (acquireGenRef.current !== gen) return; // stale attempt
       const e = err as { name?: string };
       if (e?.name === 'NotAllowedError' || e?.name === 'SecurityError') {
         setPermissionError(
           'No has dado permiso a la cámara. Habilítala en los ajustes del navegador.',
         );
       } else if (e?.name === 'NotFoundError' || e?.name === 'OverconstrainedError') {
-        setPermissionError(
-          'No detectamos ninguna cámara en este dispositivo.',
-        );
+        setPermissionError('No detectamos ninguna cámara en este dispositivo.');
       } else {
         setPermissionError('No se ha podido iniciar la cámara.');
       }
+      if (watchdogRef.current !== null) {
+        window.clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
+      teardown();
+      setPhase('intro');
+      return;
+    }
+    if (acquireGenRef.current !== gen) {
+      // A newer attempt superseded us; drop this stream.
+      stream.getTracks().forEach((t) => t.stop());
+      return;
+    }
+    streamRef.current = stream;
+
+    // The <video> is already mounted (we are in `preparing`). Assign + play.
+    const video = videoRef.current;
+    if (video) attachAndPlay(video, stream);
+
+    // Await the model (already in flight). On failure, surface and bail out.
+    try {
+      const landmarker = await landmarkerPromise;
+      if (acquireGenRef.current !== gen) {
+        landmarker.close?.();
+        return;
+      }
+      landmarkerRef.current = landmarker;
+    } catch (err) {
+      if (acquireGenRef.current !== gen) return;
+      console.error('[ExerciseSession] MediaPipe init failed', err);
+      setPermissionError('No hemos podido cargar el detector de mano. Comprueba tu conexión.');
+      if (watchdogRef.current !== null) {
+        window.clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
+      teardown();
+      setPhase('intro');
       return;
     }
 
-    // 2. Switch to running so the <video> renders, then attach the stream.
-    setPhase('running');
-    startedAtRef.current = new Date().toISOString();
-
-    // Wait one frame so the <video> mounts.
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-
-    const video = videoRef.current;
-    if (video && streamRef.current) {
-      video.srcObject = streamRef.current;
-      try {
-        await video.play();
-      } catch {
-        // iOS Safari: play() may reject if not strictly user-gestured. The
-        // gesture is the "Empezar" tap, which should satisfy it; if it still
-        // throws we surface a soft message and fall back.
-      }
-    }
-
-    // 3. MediaPipe.
-    try {
-      const vision = await import('@mediapipe/tasks-vision');
-      const fileset = await vision.FilesetResolver.forVisionTasks(
-        MEDIAPIPE_WASM_URL,
-      );
-      const landmarker = (await vision.HandLandmarker.createFromOptions(fileset, {
-        baseOptions: {
-          modelAssetPath: HAND_LANDMARKER_MODEL_URL,
-          delegate: 'GPU',
-        },
-        numHands: 1,
-        runningMode: 'VIDEO',
-      })) as unknown as HandLandmarkerInstance;
-      landmarkerRef.current = landmarker;
-    } catch (err) {
-      console.error('[ExerciseSession] MediaPipe init failed', err);
-      // Try CPU fallback.
-      try {
-        const vision = await import('@mediapipe/tasks-vision');
-        const fileset = await vision.FilesetResolver.forVisionTasks(
-          MEDIAPIPE_WASM_URL,
-        );
-        const landmarker = (await vision.HandLandmarker.createFromOptions(fileset, {
-          baseOptions: {
-            modelAssetPath: HAND_LANDMARKER_MODEL_URL,
-            delegate: 'CPU',
-          },
-          numHands: 1,
-          runningMode: 'VIDEO',
-        })) as unknown as HandLandmarkerInstance;
-        landmarkerRef.current = landmarker;
-      } catch (err2) {
-        console.error('[ExerciseSession] MediaPipe CPU init failed', err2);
-        setPermissionError(
-          'No hemos podido cargar el detector de mano. Comprueba tu conexión.',
-        );
-        teardown();
-        setPhase('intro');
-        return;
-      }
-    }
-
-    // 4. Start rAF loop.
+    // Reset rep + display accumulators, then start the rAF loop. The loop will
+    // flip the phase to `running` once it decodes the first frame.
     repCountRef.current = 0;
     repHistoryRef.current = [];
     angleHistoryRef.current = [];
     directionRef.current = null;
-    currentRepRef.current = {
-      rep_index: 0,
-      perJoint: {},
-      framesTotal: 0,
-      framesMissing: 0,
-    };
+    currentRepRef.current = { rep_index: 0, perJoint: {}, framesTotal: 0, framesMissing: 0 };
+    repCoachingRef.current = createRepCoaching();
+    handednessSamplesRef.current = [];
+    handednessFiredRef.current = false;
     displayHistoryRef.current = [];
     displayAngleRef.current = 0;
     displayPeakRef.current = 0;
@@ -674,7 +783,20 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     setLivePeak(0);
     setLivePerJoint({});
     scheduleNextFrame();
-  }, [scheduleNextFrame, teardown]);
+  }, [attachAndPlay, loadLandmarker, scheduleNextFrame, stopLoop, stopStream, teardown]);
+
+  // "Empezar" tap: flip to `preparing` immediately (so we never show a black
+  // void) and acquire the camera. The <video> mounts in `preparing`.
+  const startSession = useCallback(() => {
+    startedAtRef.current = new Date().toISOString();
+    setPhase('preparing');
+    void acquireCamera();
+  }, [acquireCamera]);
+
+  // In-place retry (watchdog button). Stays in the session; re-acquires.
+  const retryCamera = useCallback(() => {
+    void acquireCamera();
+  }, [acquireCamera]);
 
   const handleEnd = useCallback(() => finishSession(), [finishSession]);
 
@@ -734,7 +856,27 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
               </p>
             ) : null}
           </section>
-          <section className="mt-8 rounded-2xl border border-gray-100 bg-white p-5">
+
+          {/* Exercise animation. */}
+          <section className="mt-6 flex justify-center rounded-2xl border border-gray-100 bg-white p-5">
+            <ExerciseAnimation exerciseCode={exercise.code} className="h-40 w-40" />
+          </section>
+
+          {/* UX-3 (surgeon, 2026-05-20) — the angle reads only work when the */}
+          {/* hand is in PROFILE, not facing the camera. Prominent callout. */}
+          <div
+            data-testid="profile-instruction"
+            className="mt-4 flex items-start gap-2 rounded-2xl border border-[#007AFF]/20 bg-[#007AFF]/5 p-4 text-[14px] leading-snug text-[#004999]"
+          >
+            <span aria-hidden className="text-[18px] leading-none">📐</span>
+            <span>
+              <span className="font-semibold">Coloca la mano DE PERFIL a la cámara</span>{' '}
+              (como cuando das la mano). Si la pones de frente, los grados no se
+              miden bien.
+            </span>
+          </div>
+
+          <section className="mt-6 rounded-2xl border border-gray-100 bg-white p-5">
             <h2 className="text-[15px] font-semibold text-gray-900">
               Antes de empezar
             </h2>
@@ -766,9 +908,12 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     );
   }
 
-  if (phase === 'running') {
+  if (phase === 'preparing' || phase === 'running') {
     return (
       <main className="relative min-h-screen w-full overflow-hidden bg-black text-white">
+        {/* BUG-1 — video + canvas are mounted in BOTH `preparing` and */}
+        {/* `running`, so the stream can attach to an existing element and the */}
+        {/* loop can decode the first frame before we reveal the HUD. */}
         <video
           ref={videoRef}
           autoPlay
@@ -781,9 +926,65 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
           className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100"
         />
 
-        {/* HUD */}
-        <div className="relative z-10 flex h-screen flex-col">
-          <div className="px-5 pt-6">
+        {/* BUG-1 — preparing overlay: visible spinner (never a black void), */}
+        {/* a profile-hand reminder (UX-3), and a watchdog retry button. */}
+        {phase === 'preparing' ? (
+          <div
+            data-testid="camera-preparing"
+            className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-black/70 px-6 text-center"
+          >
+            {cameraStalled ? (
+              <>
+                <p className="text-[16px] font-semibold">La cámara no arranca</p>
+                <p className="max-w-[280px] text-[14px] text-white/70">
+                  A veces tarda en activarse. Pulsa para volver a intentarlo sin
+                  salir del ejercicio.
+                </p>
+                {permissionError ? (
+                  <p
+                    data-testid="camera-error"
+                    role="alert"
+                    className="max-w-[280px] text-[13px] text-red-300"
+                  >
+                    {permissionError}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  data-testid="camera-retry"
+                  onClick={retryCamera}
+                  className="mt-1 inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-[15px] font-semibold text-gray-900 active:bg-gray-200"
+                >
+                  <RotateCcw size={18} aria-hidden /> Reintentar
+                </button>
+              </>
+            ) : (
+              <>
+                <Loader2 size={36} className="animate-spin text-white/90" aria-hidden />
+                <p className="text-[16px] font-semibold">Preparando cámara…</p>
+                <p className="max-w-[280px] text-[13px] text-white/70">
+                  📐 Recuerda colocar la mano DE PERFIL a la cámara.
+                </p>
+              </>
+            )}
+          </div>
+        ) : null}
+
+        {/* HUD — only while running. */}
+        <div
+          className={`relative z-10 flex h-screen flex-col ${
+            phase === 'running' ? '' : 'pointer-events-none opacity-0'
+          }`}
+        >
+          {/* BUG-2 — top controls get safe-area padding so the Terminar */}
+          {/* button + angle HUD clear the iOS notch / status bar. */}
+          <div
+            data-testid="session-top-controls"
+            className="px-5 pt-[max(1.5rem,env(safe-area-inset-top))]"
+          >
+            {/* Top row: rep counter (left) + Terminar (right). Kept as its */}
+            {/* own row so the wide angle HUD below can never push Terminar */}
+            {/* off-screen (BUG-2: it was overflowing the right edge at 390px). */}
             <div className="flex items-start justify-between gap-3">
               <div className="rounded-2xl bg-black/50 px-4 py-3 backdrop-blur">
                 <div className="text-[12px] uppercase tracking-wider text-white/70">
@@ -795,9 +996,20 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
                 </div>
               </div>
 
-              {/* F-13 — live angle indicator overlay (top-right). Frosted */}
-              {/* white panel so it reads against camera background regardless */}
-              {/* of skin tone or lighting. */}
+              <button
+                type="button"
+                data-testid="end-session"
+                onClick={handleEnd}
+                className="rounded-full bg-white/20 px-4 py-2 text-[14px] font-semibold backdrop-blur active:bg-white/30"
+              >
+                Terminar
+              </button>
+            </div>
+
+            {/* F-13 — live angle indicator overlay. Frosted white panel so it */}
+            {/* reads against the camera background regardless of skin tone or */}
+            {/* lighting. On its own row, right-aligned, below the controls. */}
+            <div className="mt-3 flex justify-end">
               <div
                 data-testid="live-angle"
                 className="rounded-2xl bg-white/70 px-4 py-3 text-gray-900 backdrop-blur shadow-lg"
@@ -837,14 +1049,6 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
                   </span>
                 </div>
               </div>
-
-              <button
-                type="button"
-                onClick={handleEnd}
-                className="rounded-full bg-white/20 px-4 py-2 text-[14px] font-semibold backdrop-blur active:bg-white/30"
-              >
-                Terminar
-              </button>
             </div>
           </div>
 
@@ -881,6 +1085,21 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
             </div>
           ) : null}
         </div>
+
+        {/* BUG-3 — coaching toast. Centered near the bottom, high z-index and */}
+        {/* an opaque blue pill so it survives the angle HUD overlap and reads */}
+        {/* clearly over the camera feed. */}
+        {phase === 'running' && toast ? (
+          <button
+            type="button"
+            key={toast.id}
+            data-testid="coaching-toast"
+            onClick={dismissToast}
+            className="absolute bottom-[max(2rem,env(safe-area-inset-bottom))] left-1/2 z-30 max-w-[88%] -translate-x-1/2 rounded-2xl bg-[#007AFF] px-5 py-3 text-center text-[15px] font-semibold text-white shadow-xl"
+          >
+            {toast.text}
+          </button>
+        ) : null}
       </main>
     );
   }
