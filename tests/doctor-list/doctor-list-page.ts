@@ -36,7 +36,7 @@ export class DoctorListPage extends BasePage {
 }
 
 export type FingerValue = 'pulgar' | 'indice' | 'medio' | 'anular' | 'menique';
-export type FingerState = 'normal' | 'injured' | 'amputated';
+export type FingerState = 'normal' | 'injured';
 
 export class NewPatientDialogPO {
   readonly dialog: Locator;
@@ -61,7 +61,7 @@ export class NewPatientDialogPO {
     this.errorBox = this.dialog.locator('div.bg-red-50');
   }
 
-  /** FB-1 — set a finger's N/L/A state in the per-finger picker. */
+  /** FB-3 — set a finger's N/L state in the per-finger picker. */
   async setFingerState(finger: FingerValue, state: FingerState): Promise<void> {
     await this.page.getByTestId(`finger-${finger}-${state}`).click();
   }
@@ -69,17 +69,15 @@ export class NewPatientDialogPO {
   async fillAndSubmit(
     externalId: string,
     pathology?: 'flexor' | 'extensor' | 'otros',
-    fingers?: { injured?: FingerValue[]; amputated?: FingerValue[] },
+    fingers?: { injured?: FingerValue[] },
     surgery?: { date?: string; note?: string },
   ): Promise<void> {
     await this.externalIdInput.fill(externalId);
     if (pathology) await this.pathologySelect.selectOption(pathology);
-    if (fingers?.injured) {
-      for (const f of fingers.injured) await this.setFingerState(f, 'injured');
-    }
-    if (fingers?.amputated) {
-      for (const f of fingers.amputated) await this.setFingerState(f, 'amputated');
-    }
+    // FB-3: ≥1 injured finger is mandatory to submit. Default to one so the
+    // many specs that don't care about fingers can still create a patient.
+    const injured = fingers?.injured ?? ['indice'];
+    for (const f of injured) await this.setFingerState(f, 'injured');
     if (surgery?.date) await this.surgeryDateInput.fill(surgery.date);
     if (surgery?.note) await this.surgeryNoteInput.fill(surgery.note);
     await this.submitButton.click();

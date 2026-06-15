@@ -35,12 +35,12 @@ export class DoctorDetailPage extends BasePage {
     return this.page.getByRole('button', { name: 'Finalizar rehabilitación' });
   }
 
-  /** FB-1 — collapsed badge summary of affected fingers ("Lesionados: …"). */
+  /** FB-1 — collapsed badge summary of injured fingers ("Lesionados: …"). */
   fingerStatusSummary(): Locator {
     return this.page.getByTestId('finger-status-summary');
   }
 
-  /** FB-1 — pencil affordance opening the inline N/L/A editor. */
+  /** FB-1 — pencil affordance opening the inline N/L editor. */
   fingerStatusEditButton(): Locator {
     return this.page.getByTestId('finger-status-edit');
   }
@@ -49,10 +49,10 @@ export class DoctorDetailPage extends BasePage {
     return this.page.getByTestId('finger-status-save');
   }
 
-  /** FB-1 — click a finger's N/L/A segment in the inline editor. */
+  /** FB-3 — click a finger's N/L segment in the inline editor. */
   async setFingerState(
     finger: 'pulgar' | 'indice' | 'medio' | 'anular' | 'menique',
-    state: 'normal' | 'injured' | 'amputated',
+    state: 'normal' | 'injured',
   ): Promise<void> {
     await this.page.getByTestId(`finger-${finger}-${state}`).click();
   }

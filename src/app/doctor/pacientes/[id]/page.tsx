@@ -69,7 +69,6 @@ export default async function PatientDetailPage({ params }: { params: Params }) 
           discharged={discharged}
           patientId={patient.id}
           injuredFingers={patient.injured_fingers ?? []}
-          amputatedFingers={patient.amputated_fingers ?? []}
           surgeryDate={patient.surgery_date}
           surgeryNote={patient.surgery_note}
         />
@@ -116,7 +115,6 @@ function Header({
   discharged,
   patientId,
   injuredFingers,
-  amputatedFingers,
   surgeryDate,
   surgeryNote,
 }: {
@@ -125,7 +123,6 @@ function Header({
   discharged: boolean;
   patientId: string;
   injuredFingers: NonNullable<PatientDetail['injured_fingers']>;
-  amputatedFingers: NonNullable<PatientDetail['amputated_fingers']>;
   surgeryDate: PatientDetail['surgery_date'];
   surgeryNote: PatientDetail['surgery_note'];
 }) {
@@ -147,14 +144,9 @@ function Header({
         <p className="text-sm text-gray-500">
           {days === 0 ? 'alta hoy' : `día ${days} de tratamiento`}
         </p>
-        {/* FB-1 — affected fingers (lesionado / amputado): badge summary when */}
-        {/* collapsed + inline N/L/A editor. */}
+        {/* FB-3 — injured fingers: badge summary when collapsed + inline N/L editor. */}
         <div className="pt-1">
-          <FingerStatusControl
-            patientId={patientId}
-            injuredFingers={injuredFingers}
-            amputatedFingers={amputatedFingers}
-          />
+          <FingerStatusControl patientId={patientId} injuredFingers={injuredFingers} />
         </div>
         {/* Round 3 — intervention date + surgical descriptor (display + inline edit). */}
         <div className="pt-1">

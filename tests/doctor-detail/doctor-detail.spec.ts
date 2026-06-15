@@ -115,7 +115,7 @@ test.describe('Doctor patient detail', () => {
   );
 
   test(
-    'create with multiple finger statuses shows the summary and can be edited inline',
+    'create with injured fingers shows the summary and can be edited inline',
     { tag: ['@high', '@e2e', '@doctor-detail', '@DOCTOR-DETAIL-E2E-005'] },
     async ({ page }, testInfo) => {
       const externalId = generatePatientId('FINGER');
@@ -123,19 +123,18 @@ test.describe('Doctor patient detail', () => {
       await list.goto();
       await list.newPatientButton.click();
       const dialog = new NewPatientDialogPO(page);
-      // FB-1: mark Meñique = Lesionado and Índice = Amputado in the dialog.
+      // FB-3: mark Meñique = Lesionado in the dialog (amputado retirado del UI;
+      // los amputados se tratan como lesionados).
       await dialog.fillAndSubmit(externalId, undefined, {
         injured: ['menique'],
-        amputated: ['indice'],
       });
       await page.waitForURL(/\/doctor\/pacientes\/[0-9a-f-]+/);
 
       const detail = new DoctorDetailPage(page);
       await detail.expectLoaded(externalId);
 
-      // Summary shows both groups (chosen at creation).
+      // Summary shows the injured finger chosen at creation.
       await expect(detail.fingerStatusSummary()).toContainText('Lesionado: Meñique');
-      await expect(detail.fingerStatusSummary()).toContainText('Amputado: Índice');
       await detail.snap(testInfo, 'patient-detail-injured-finger');
 
       // Edit: add Anular = Lesionado, then save (PATCH full replacement).
@@ -148,7 +147,6 @@ test.describe('Doctor patient detail', () => {
       // Persists across a reload.
       await page.reload();
       await expect(detail.fingerStatusSummary()).toContainText('Lesionados: Meñique, Anular');
-      await expect(detail.fingerStatusSummary()).toContainText('Amputado: Índice');
     },
   );
 

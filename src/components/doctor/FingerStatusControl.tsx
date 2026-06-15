@@ -7,43 +7,34 @@ import type { FingerName } from '@/lib/database.types';
 import { FingerStatusPicker, fingerSummary } from './FingerStatusPicker';
 
 /**
- * FB-1 (2026-06-06) — inline control to view/edit a patient's affected fingers
- * with status (lesionado / amputado). Replaces the single-finger
- * InjuredFingerControl.
+ * FB-1 (2026-06-06) — inline control to view/edit a patient's injured fingers.
+ * FB-3 (2026-06-15) — simplified to N/L (amputados se tratan como lesionados);
+ * al menos un dedo lesionado es obligatorio.
  *
  * Sibling of SurgeryControl (same conventions: client island, optimistic value
  * with revert-on-error, disabled while saving, router.refresh() on success).
- * Collapsed it renders a badge summary ("Lesionados: Meñique, Anular ·
- * Amputado: Índice", or "Dedos: sin especificar") + a pencil. The pencil opens
- * the 5-row N/L/A editor. Saving PATCHes both arrays as a FULL replacement
- * (`[]` clears) — the backend validates no-overlap and stores them.
+ * Collapsed it renders a badge summary ("Lesionados: Meñique, Anular", or
+ * "Dedos: sin especificar") + a pencil. The pencil opens the 5-row N/L editor.
+ * Saving PATCHes the array as a FULL replacement — the backend rejects `[]`.
  */
 
 type Props = {
   patientId: string;
   injuredFingers: FingerName[];
-  amputatedFingers: FingerName[];
 };
 
-export function FingerStatusControl({
-  patientId,
-  injuredFingers,
-  amputatedFingers,
-}: Props) {
+export function FingerStatusControl({ patientId, injuredFingers }: Props) {
   const router = useRouter();
   const [injured, setInjured] = useState<FingerName[]>(injuredFingers);
-  const [amputated, setAmputated] = useState<FingerName[]>(amputatedFingers);
   const [editing, setEditing] = useState(false);
   const [draftInjured, setDraftInjured] = useState<FingerName[]>(injuredFingers);
-  const [draftAmputated, setDraftAmputated] = useState<FingerName[]>(amputatedFingers);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const summary = fingerSummary(injured, amputated);
+  const summary = fingerSummary(injured);
 
   function openEditor() {
     setDraftInjured(injured);
-    setDraftAmputated(amputated);
     setError(null);
     setEditing(true);
   }
@@ -54,29 +45,27 @@ export function FingerStatusControl({
   }
 
   async function handleSave() {
+    // FB-3: at least one injured finger is mandatory (backend rejects []).
+    if (draftInjured.length === 0) {
+      setError('Marca al menos un dedo lesionado.');
+      return;
+    }
     const prevInjured = injured;
-    const prevAmputated = amputated;
-    // Full-array replacement on both — the backend treats each array as
-    // authoritative and validates no cross-overlap.
+    // Full-array replacement — the backend treats the array as authoritative.
     setInjured(draftInjured);
-    setAmputated(draftAmputated);
     setSaving(true);
     setError(null);
     try {
       const res = await fetch(`/api/doctor/patients/${patientId}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          injured_fingers: draftInjured,
-          amputated_fingers: draftAmputated,
-        }),
+        body: JSON.stringify({ injured_fingers: draftInjured }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setEditing(false);
       router.refresh();
     } catch {
       setInjured(prevInjured);
-      setAmputated(prevAmputated);
       setError('No se pudo guardar.');
     } finally {
       setSaving(false);
@@ -88,12 +77,8 @@ export function FingerStatusControl({
       <div className="flex flex-col gap-2 max-w-[320px]" data-testid="finger-status-control">
         <FingerStatusPicker
           injured={draftInjured}
-          amputated={draftAmputated}
           disabled={saving}
-          onChange={({ injured: ni, amputated: na }) => {
-            setDraftInjured(ni);
-            setDraftAmputated(na);
-          }}
+          onChange={(ni) => setDraftInjured(ni)}
         />
         <div className="flex items-center gap-2">
           <button
@@ -122,7 +107,7 @@ export function FingerStatusControl({
     );
   }
 
-  const hasAny = injured.length > 0 || amputated.length > 0;
+  const hasAny = injured.length > 0;
 
   return (
     <div className="flex items-center gap-2 flex-wrap" data-testid="finger-status-control">

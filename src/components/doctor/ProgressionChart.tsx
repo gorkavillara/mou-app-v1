@@ -14,6 +14,8 @@ import {
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import type { ProgressionResponse } from '@/lib/doctor-api';
+import { FINGER_LABELS } from './FingerStatusPicker';
+import type { FingerName } from '@/lib/database.types';
 
 type Props = {
   data: ProgressionResponse | null;
@@ -40,9 +42,26 @@ const Y_AXIS_CAP = 110;
 
 type ChartRow = {
   day: string;
-  // Each joint contributes a `<joint>_flex` and optional `<joint>_ext` field.
+  // Each series contributes a `<key>_flex` and optional `<key>_ext` field.
   [key: string]: number | string | null;
 };
+
+// FB-3: a chart series is now (joint × finger). `key` is the stable, field-safe
+// identifier used in chart rows/dataKeys; `label` is the human-readable legend
+// text (e.g. "MCP · Índice", or just "MCP" for legacy finger-less rows).
+type SeriesMeta = {
+  key: string;
+  label: string;
+  joint: string;
+};
+
+function seriesKey(joint: string, finger: FingerName | null): string {
+  return finger ? `${joint}__${finger}` : joint;
+}
+
+function seriesLabel(joint: string, finger: FingerName | null): string {
+  return finger ? `${joint} · ${FINGER_LABELS[finger]}` : joint;
+}
 
 function colorForJoint(joint: string, idx: number): string {
   return JOINT_COLORS[joint] ?? FALLBACK_COLOR ?? `hsl(${(idx * 53) % 360} 70% 45%)`;
@@ -68,24 +87,31 @@ export function ProgressionChart({ data }: Props) {
   const series = data?.series ?? [];
   const hasAnyPoints = series.some((s) => s.points.length > 0);
 
-  const { chartData, joints, hasExtension, yMax, xTickInterval } = useMemo(() => {
-    // Merge per-joint points into a single row keyed by day so Recharts can
-    // render multiple lines on the same X axis.
+  const { chartData, seriesMeta, hasExtension, yMax, xTickInterval } = useMemo(() => {
+    // Merge per-series (joint × finger) points into a single row keyed by day
+    // so Recharts can render multiple lines on the same X axis.
     const dayMap = new Map<string, ChartRow>();
+    const metaList: SeriesMeta[] = [];
     let maxValue = 0;
     let extensionPresent = false;
 
     for (const s of series) {
+      const key = seriesKey(s.joint, s.finger);
+      metaList.push({ key, label: seriesLabel(s.joint, s.finger), joint: s.joint });
       for (const p of s.points) {
         const row = dayMap.get(p.day) ?? { day: p.day };
         if (p.max_flexion != null) {
-          row[`${s.joint}_flex`] = p.max_flexion;
+          row[`${key}_flex`] = p.max_flexion;
           if (p.max_flexion > maxValue) maxValue = p.max_flexion;
         }
-        if (p.max_extension != null && p.max_extension > 0) {
-          // Hyperextension is reported as a positive number; we plot it on
-          // the negative half so it visually subtracts from the resting line.
-          row[`${s.joint}_ext`] = -p.max_extension;
+        if (p.max_extension != null && p.max_extension !== 0) {
+          // The session stores extension as a SIGNED NEGATIVE value and
+          // patient_progression returns min(max_extension_deg) — so a real
+          // extension excursion arrives here as a NEGATIVE number. (Older rows
+          // may carry a positive magnitude.) Plot it on the negative half
+          // regardless of the stored sign so the deficit is always visible —
+          // the previous `> 0` test silently dropped every modern row.
+          row[`${key}_ext`] = -Math.abs(p.max_extension);
           extensionPresent = true;
         }
         dayMap.set(p.day, row);
@@ -103,7 +129,7 @@ export function ProgressionChart({ data }: Props) {
 
     return {
       chartData: sorted,
-      joints: series.map((s) => s.joint),
+      seriesMeta: metaList,
       hasExtension: extensionPresent,
       yMax: cap,
       xTickInterval: interval,
@@ -126,7 +152,7 @@ export function ProgressionChart({ data }: Props) {
       <div className="sm:hidden h-55">
         <ChartInner
           data={chartData}
-          joints={joints}
+          seriesMeta={seriesMeta}
           hasExtension={hasExtension}
           yMax={yMax}
           xTickInterval={xTickInterval}
@@ -136,7 +162,7 @@ export function ProgressionChart({ data }: Props) {
       <div className="hidden sm:block h-80">
         <ChartInner
           data={chartData}
-          joints={joints}
+          seriesMeta={seriesMeta}
           hasExtension={hasExtension}
           yMax={yMax}
           xTickInterval={xTickInterval}
@@ -148,13 +174,13 @@ export function ProgressionChart({ data }: Props) {
 
 function ChartInner({
   data,
-  joints,
+  seriesMeta,
   hasExtension,
   yMax,
   xTickInterval,
 }: {
   data: ChartRow[];
-  joints: string[];
+  seriesMeta: SeriesMeta[];
   hasExtension: boolean;
   yMax: number;
   xTickInterval: number;
@@ -164,10 +190,10 @@ function ChartInner({
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={data} margin={{ top: 12, right: 12, left: -10, bottom: 0 }}>
         <defs>
-          {joints.map((joint, idx) => {
-            const color = colorForJoint(joint, idx);
+          {seriesMeta.map((m, idx) => {
+            const color = colorForJoint(m.joint, idx);
             return (
-              <linearGradient key={joint} id={`gradient-${joint}`} x1="0" y1="0" x2="0" y2="1">
+              <linearGradient key={m.key} id={`gradient-${m.key}`} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={color} stopOpacity={0.95} />
                 <stop offset="100%" stopColor={color} stopOpacity={0.55} />
               </linearGradient>
@@ -204,10 +230,10 @@ function ChartInner({
           labelFormatter={(value) => formatTooltipDay(String(value))}
           formatter={(value, name) => {
             const num = typeof value === 'number' ? value : Number(value);
-            const [joint, kind] = String(name).split('|');
+            const [label, kind] = String(name).split('|');
             const display =
               kind === 'ext' ? `${Math.abs(num)}° ext` : `${num}° flex`;
-            return [display, joint];
+            return [display, label];
           }}
         />
         <Legend
@@ -216,15 +242,15 @@ function ChartInner({
           iconType="circle"
           wrapperStyle={{ fontSize: 12, paddingBottom: 4 }}
         />
-        {joints.map((joint, idx) => {
-          const color = colorForJoint(joint, idx);
+        {seriesMeta.map((m, idx) => {
+          const color = colorForJoint(m.joint, idx);
           return (
             <Line
-              key={`${joint}-flex`}
+              key={`${m.key}-flex`}
               type="monotone"
-              dataKey={`${joint}_flex`}
-              name={`${joint}|flex`}
-              stroke={`url(#gradient-${joint})`}
+              dataKey={`${m.key}_flex`}
+              name={`${m.label}|flex`}
+              stroke={`url(#gradient-${m.key})`}
               strokeWidth={2.5}
               dot={{ r: 3, fill: color, strokeWidth: 0 }}
               activeDot={{ r: 5 }}
@@ -234,14 +260,14 @@ function ChartInner({
           );
         })}
         {hasExtension &&
-          joints.map((joint, idx) => {
-            const color = colorForJoint(joint, idx);
+          seriesMeta.map((m, idx) => {
+            const color = colorForJoint(m.joint, idx);
             return (
               <Line
-                key={`${joint}-ext`}
+                key={`${m.key}-ext`}
                 type="monotone"
-                dataKey={`${joint}_ext`}
-                name={`${joint}|ext`}
+                dataKey={`${m.key}_ext`}
+                name={`${m.label}|ext`}
                 stroke={color}
                 strokeOpacity={0.4}
                 strokeDasharray="4 3"

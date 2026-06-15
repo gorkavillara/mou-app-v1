@@ -22,10 +22,10 @@ export function NewPatientDialog({ open, onClose }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [externalId, setExternalId] = useState('');
   const [pathology, setPathology] = useState<'' | 'flexor' | 'extensor' | 'otros'>('');
-  // FB-1: per-finger status, modelled as two arrays mirroring the backend
-  // contract (`injured_fingers` / `amputated_fingers`). Empty = all Normal.
+  // FB-3: per-finger status, modelled as a single array mirroring the backend
+  // contract (`injured_fingers`). Empty = all Normal. At least one injured
+  // finger is mandatory (validated client- and server-side).
   const [injuredFingers, setInjuredFingers] = useState<FingerName[]>([]);
-  const [amputatedFingers, setAmputatedFingers] = useState<FingerName[]>([]);
   // Round 3: intervention date + short surgical descriptor (both optional).
   const [surgeryDate, setSurgeryDate] = useState('');
   const [surgeryNote, setSurgeryNote] = useState('');
@@ -47,7 +47,6 @@ export function NewPatientDialog({ open, onClose }: Props) {
     setExternalId('');
     setPathology('');
     setInjuredFingers([]);
-    setAmputatedFingers([]);
     setSurgeryDate('');
     setSurgeryNote('');
     setError(null);
@@ -72,6 +71,10 @@ export function NewPatientDialog({ open, onClose }: Props) {
       setError('Solo letras, números, espacios y - _ / están permitidos.');
       return;
     }
+    if (injuredFingers.length === 0) {
+      setError('Marca al menos un dedo lesionado.');
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -79,16 +82,14 @@ export function NewPatientDialog({ open, onClose }: Props) {
         external_id: string;
         pathology_code?: 'flexor' | 'extensor' | 'otros';
         injured_fingers?: FingerName[];
-        amputated_fingers?: FingerName[];
         surgery_date?: string;
         surgery_note?: string;
       } = {
         external_id: id,
       };
       if (pathology) body.pathology_code = pathology;
-      // FB-1: only include each array when non-empty (omit on create otherwise).
-      if (injuredFingers.length > 0) body.injured_fingers = injuredFingers;
-      if (amputatedFingers.length > 0) body.amputated_fingers = amputatedFingers;
+      // FB-3: at least one injured finger is mandatory (validated above).
+      body.injured_fingers = injuredFingers;
       // Round 3: include only when filled (date non-empty; note trimmed non-empty).
       if (surgeryDate) body.surgery_date = surgeryDate;
       const note = surgeryNote.trim();
@@ -188,16 +189,12 @@ export function NewPatientDialog({ open, onClose }: Props) {
 
           <div className="space-y-1.5">
             <span className="block text-[13px] font-medium text-gray-500 ml-1">
-              Dedos afectados (opcional)
+              Dedos lesionados
             </span>
             <FingerStatusPicker
               injured={injuredFingers}
-              amputated={amputatedFingers}
               disabled={submitting}
-              onChange={({ injured, amputated }) => {
-                setInjuredFingers(injured);
-                setAmputatedFingers(amputated);
-              }}
+              onChange={(injured) => setInjuredFingers(injured)}
             />
           </div>
 
@@ -251,7 +248,7 @@ export function NewPatientDialog({ open, onClose }: Props) {
           </button>
           <button
             type="submit"
-            disabled={submitting || !externalId}
+            disabled={submitting || !externalId || injuredFingers.length === 0}
             className="h-10 px-4 bg-[#007AFF] hover:bg-[#0069D9] active:bg-[#005BB5] disabled:bg-blue-300 text-white text-sm font-semibold rounded-xl"
           >
             {submitting ? 'Creando…' : 'Crear paciente'}
