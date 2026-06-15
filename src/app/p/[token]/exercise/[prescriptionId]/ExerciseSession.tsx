@@ -685,6 +685,37 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     ctx.clearRect(0, 0, rect.width, rect.height);
 
     if (hand) {
+      // Privacy (surgeon feedback 2026-06-15): the <video> behind this canvas is
+      // CSS-blurred so bystanders are never identifiable. We keep ONLY the hand
+      // sharp by clipping the RAW frame (drawImage reads the un-blurred pixels)
+      // to an ellipse around the hand's bounding box. The rest stays blurred.
+      const videoW = video.videoWidth || rect.width;
+      const videoH = video.videoHeight || rect.height;
+      const cover = Math.max(rect.width / videoW, rect.height / videoH);
+      const dW = videoW * cover;
+      const dH = videoH * cover;
+      const dX = (rect.width - dW) / 2;
+      const dY = (rect.height - dH) / 2;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const p of hand) {
+        const x = p.x * videoW * cover + dX;
+        const y = p.y * videoH * cover + dY;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      const rx = ((maxX - minX) / 2) * 1.6 + 24;
+      const ry = ((maxY - minY) / 2) * 1.6 + 24;
+      ctx.save();
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
+      ctx.clip();
+      ctx.drawImage(video, dX, dY, dW, dH);
+      ctx.restore();
+
       // FB-3 / IA-14: feed the REAL normalized MCP per finger so `drawHand`
       // paints the per-fingertip label for the injured fingers (it was hard-
       // coded to 0, so the labels showed nothing). One full map is required.
@@ -1182,12 +1213,16 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
         {/* the loop can decode the first frame before we reveal the HUD, and */}
         {/* the rest screen between sets keeps the camera alive for an instant */}
         {/* resume. */}
+        {/* Privacy: the raw feed is CSS-blurred so anyone behind the patient is */}
+        {/* unidentifiable. MediaPipe reads the element's RAW frames (the CSS */}
+        {/* filter is display-only), and the canvas re-paints just the hand */}
+        {/* region sharp on top. */}
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted
-          className="absolute inset-0 h-full w-full -scale-x-100 object-cover"
+          className="absolute inset-0 h-full w-full -scale-x-100 object-cover blur-[16px]"
         />
         <canvas
           ref={canvasRef}
@@ -1331,6 +1366,17 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
               >
                 Terminar
               </button>
+            </div>
+
+            {/* Persistent profile reminder — the MCP angle is only accurate */}
+            {/* when the hand is in PROFILE; keep it visible the whole session. */}
+            <div className="mt-2 flex">
+              <span
+                data-testid="profile-reminder"
+                className="inline-flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1.5 text-[12px] font-medium text-white/90 backdrop-blur"
+              >
+                <span aria-hidden>📐</span> Mantén la mano de perfil
+              </span>
             </div>
 
             {/* F-13 — live angle indicator overlay. Frosted white panel so it */}
