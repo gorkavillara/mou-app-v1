@@ -22,6 +22,7 @@ mou-board-version: 1
 
 ## 🔧 En curso
 
+- [ ] **IA-17** [P0] Rehacer interfaz de calibración MCP por dedo (overlay metacarpiano/falange/arco) + captura multipunto goniómetro-referenciada (geometría OK, fallaba la calibración promediada); recalibración real pendiente de OPS-1 #ia
 - [ ] **F-15** [P2] Modo oscuro completo en panel doctor #frontend
 
 

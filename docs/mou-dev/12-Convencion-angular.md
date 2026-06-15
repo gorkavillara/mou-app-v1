@@ -24,8 +24,16 @@ Para cada articulación medible, fijamos:
 - **0°**: Falange proximal en línea con metacarpiano (dedo recto).
 - **Flexión completa**: ~**90°** hacia palma.
 - **Extensión**: ~**−30°** (hiperextensión clínica, raro fuera de pulgar).
-- **Vector A**: wrist → MCP del dedo (landmarks 0→{5,9,13,17}).
-- **Vector B**: MCP → PIP del mismo dedo ({5,9,13,17}→{6,10,14,18}).
+- **Vector A**: wrist → MCP del dedo (landmarks 0→{5,9,13,17}) = **metacarpiano** (hueso de la mano).
+- **Vector B**: MCP → PIP del mismo dedo ({5,9,13,17}→{6,10,14,18}) = **falange proximal** del dedo.
+
+> **Nota 2026-06-15 (FB clínico Gorka/cirujano — calibración, no geometría):** el cirujano revisó las mediciones y los grados normalizados no eran fiables. Aclaración clínica clave: el ángulo a medir (por ahora, Fase 1) es el **MCP**, definido como el ángulo entre el **metacarpiano** (hueso de la mano) y la **falange proximal** del dedo afectado.
+>
+> **Diagnóstico**: la **geometría del lib ya mide ese ángulo correctamente**. `calculateJointAngles().MCP` usa el vector `muñeca (landmark 0) → nudillo MCP` (= metacarpiano) contra `nudillo MCP → PIP` (= falange proximal); es exactamente el MCP clínico. Lo que fallaba **no era el cálculo sino la CALIBRACIÓN**: los `measuredOpen`/`measuredClosed` de `JOINT_CALIBRATION.MCP` se capturaron **una sola vez con webcam, promediando entre los 4 dedos largos y SIN goniómetro real**, por eso los grados normalizados no cuadran con la clínica.
+>
+> **En curso (ver [[02-Decisiones-clave#D16]] y [[05-Tareas-IA#IA-17]])**: se rehace la interfaz `/dev/calibration` para medir el MCP **del dedo afectado/seleccionado** (sin promediar), **dibujar sobre el vídeo** el metacarpiano, la falange proximal y el arco del ángulo (transparencia para el cirujano), y hacer **captura multipunto goniómetro-referenciada** (≥2 puntos → ajuste lineal `clinical = m·raw + b` → se derivan `measuredOpen`/`measuredClosed`). Tras esto queda **PENDIENTE la recalibración real con datos del goniómetro** (la captura la harán Gorka/Javi; a Javi solo validación clínica).
+>
+> ⚠️ Hasta esa recalibración, los valores de `JOINT_CALIBRATION.MCP` (12.3° / 98.8°, captura 2026-06-06) están **marcados como PENDIENTES** y no deben creerse en producción.
 
 ### PIP (interfalángica proximal) — articulación media
 - **0°**: Falange media en línea con proximal.
@@ -53,7 +61,7 @@ El pulgar tiene cinemática distinta (oposición, abducción, MCP+IP solo). Lo d
 | Articulación | 0° clínico | Tope clínico | Medido empírico (abierto / cerrado) | Hiperext. |
 |---|---|---|---|---|
 | wrist | mano recta | +90° flex / −70° ext | _pendiente — la herramienta aún no mide muñeca_ | sí |
-| MCP (índice/medio/anular/meñique) | dedo recto | 90° / −30° ext | 12.3° / 98.8° (2026-06-06) | leve |
+| MCP (índice/medio/anular/meñique) | dedo recto | 90° / −30° ext | 12.3° / 98.8° (2026-06-06) — ⚠️ **PENDIENTE recalibración goniómetro** (promediado entre dedos, sin goniómetro; ver nota 2026-06-15) | leve |
 | PIP | falange media recta | 100° / −30° ext | −5.7° / 81.4° (2026-06-06) | sí (−30°, BUG-4 2026-05-20) |
 | DIP | falange distal recta | 80° / −30° ext | −5.6° / 71.9° (2026-06-06) | sí (−30°, BUG-4 2026-05-20) |
 

@@ -89,3 +89,14 @@
 1. **IA**: extender la medición de FB-3 de "sólo MCP" a **MCP+PIP+DIP** por cada dedo afectado, en cámara y en el payload; HUD que muestre las 3 articulaciones por dedo afectado de forma legible.
 2. **Frontend doctor**: visualizar la progresión de ROM **por articulación×dedo afectado** (no sólo MCP) en el panel; informe/PDF con ROM completo por dedo afectado.
 3. **OPS/clínica**: validación con **goniómetro** de la calibración de **PIP y DIP** (y decidir si se mide la **muñeca** y cómo, dado que hoy su calibración es un placeholder sin referencia de antebrazo). Depende de la sesión clínica con Javi (cirujano), a quien sólo se le pide **validación clínica**, nunca tareas técnicas.
+
+## D16 — Nueva interfaz de calibración MCP por dedo + goniómetro-referenciada (FB clínico, 2026-06-15)
+**Decisión (en curso, 2026-06-15)**: rehacer la interfaz `/dev/calibration` para calibrar el **MCP** del **dedo afectado/seleccionado** (sin promediar entre dedos) contra un **goniómetro real**. Cuatro cambios:
+1. **Medir el MCP del dedo seleccionado**, no promediar entre los 4 dedos largos (causa raíz del FB del cirujano).
+2. **Dibujar sobre el vídeo** el metacarpiano, la falange proximal y el arco del ángulo MCP (transparencia: que el cirujano vea exactamente qué se mide).
+3. **Captura multipunto goniómetro-referenciada**: el usuario coloca el dedo en una posición cuyo MCP ha medido con goniómetro real, introduce ese valor clínico y captura el crudo de la cámara; con **≥2 puntos** se hace un ajuste lineal `clinical = m·raw + b` y se derivan `measuredOpen`/`measuredClosed` para `JOINT_CALIBRATION.MCP`.
+4. **PENDIENTE**: la **recalibración real** con datos del goniómetro (captura por Gorka/Javi). Esta decisión deja la herramienta lista; los valores empíricos reales siguen pendientes.
+
+**Por qué**: la geometría del lib ya media el MCP correctamente (`muñeca→MCP` = metacarpiano contra `MCP→PIP` = falange proximal); el problema era la **calibración**, capturada una sola vez con webcam, **promediada entre dedos y sin goniómetro**, por lo que los grados normalizados no eran clínicamente fiables. Ver [[12-Convencion-angular]] (nota 2026-06-15) y [[tests/feedback-gorka-2026-06-15]].
+
+**Enlaces**: se apoya en [[02-Decisiones-clave#D14]] (medición por dedo afectado, sin promediar) y queda **bloqueada en su cierre** por [[13-Tablero|OPS-1]] (validación con goniómetro por Javi), que sigue **pendiente**. Implementación en [[05-Tareas-IA#IA-17]].

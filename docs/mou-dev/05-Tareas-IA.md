@@ -75,6 +75,18 @@ Si el paciente no llega al rango mínimo en 3 reps consecutivas, pop-up: *"Inten
 - Construir los `rep_measurements` con la dimensión **dedo** (`finger`) por cada articulación medida (consume B-22).
 - Un MCP por dedo afectado por rep; sin agregación entre dedos en el cliente.
 
+### IA-17 [P0] Rehacer interfaz de calibración MCP por dedo + recalibración con goniómetro real
+> En curso (2026-06-15). FB clínico del cirujano: los grados normalizados no son fiables. Ver [[02-Decisiones-clave#D16]] y [[12-Convencion-angular]] (nota 2026-06-15).
+
+**Diagnóstico (no es bug de geometría)**: `calculateJointAngles().MCP` ya mide el MCP correcto (`muñeca→MCP` = metacarpiano contra `MCP→PIP` = falange proximal). El fallo está en la **calibración** de `JOINT_CALIBRATION.MCP`: capturada una vez con webcam, **promediando entre los 4 dedos largos y sin goniómetro real**.
+
+**Rehacer `/dev/calibration`** para:
+- Medir el MCP **del dedo afectado/seleccionado**, sin promediar entre dedos.
+- **Dibujar sobre el vídeo** el metacarpiano, la falange proximal y el arco del ángulo MCP (transparencia para el cirujano).
+- **Captura multipunto goniómetro-referenciada**: introducir el valor clínico medido con goniómetro + capturar el crudo; con ≥2 puntos, ajuste lineal `clinical = m·raw + b` → derivar `measuredOpen`/`measuredClosed`.
+
+**Pendiente acoplado**: la **recalibración real con datos del goniómetro** (captura Gorka/Javi) es [[13-Tablero|OPS-1]] [P0], que sigue **pendiente**. Esta tarea (IA-17) sólo deja lista la herramienta; los valores empíricos reales no se cierran hasta OPS-1.
+
 ## Fase 2 — ROM completo por articulación (D15)
 
 > **Fase 2, no piloto.** No bloquea el piloto. Base: [[02-Decisiones-clave#D15]], que se apoya en FB-3 ([[02-Decisiones-clave#D14]]) y [[02-Decisiones-clave#D11]]. La BD y el pipeline ya quedan listos en FB-3 (granularidad rep × articulación × dedo); aquí se extiende de "sólo MCP" a todas las articulaciones del dedo afectado.
