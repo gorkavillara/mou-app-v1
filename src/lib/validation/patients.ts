@@ -28,6 +28,19 @@ const fingerArraySchema = z
     error: 'finger values must be unique',
   });
 
+/**
+ * D14 (FB-3): the doctor MUST mark at least one injured finger — the injured
+ * set drives the goniometer (the camera measures the MCP of each injured
+ * finger). Same uniqueness/cap rules as `fingerArraySchema` but non-empty.
+ */
+const injuredFingersSchema = z
+  .array(fingerNameSchema)
+  .min(1, { error: 'at least one injured finger is required' })
+  .max(5, { error: 'at most 5 fingers' })
+  .refine((arr) => new Set(arr).size === arr.length, {
+    error: 'finger values must be unique',
+  });
+
 /** FB-1: the two arrays must not share any finger. */
 function noOverlap(
   body: { injured_fingers?: FingerName[]; amputated_fingers?: FingerName[] },
@@ -94,10 +107,12 @@ const externalIdSchema = z
  * so that any extra field — including PII fields someone might add by accident —
  * causes a validation error. Defense in depth: the DB also lacks those columns.
  *
- * FB-1: `injured_fingers` and `amputated_fingers` are optional arrays on
- * create; omission = `[]`. Each holds up to 5 distinct finger names and the two
- * arrays must NOT overlap (`.refine`). The legacy singular `injured_finger` is
- * REMOVED — `.strict()` now rejects it.
+ * D14 (FB-3): `injured_fingers` is now REQUIRED and non-empty (>= 1) — the
+ * doctor must declare which finger(s) are affected because the injured set is
+ * what the goniometer measures. `amputated_fingers` is deprecated/unused (the
+ * picker is N/L only) but the column and schema field stay for back-compat;
+ * when present it must still not overlap the injured set. The legacy singular
+ * `injured_finger` is REMOVED — `.strict()` rejects it.
  *
  * UX-5: `surgery_date` (valid calendar YYYY-MM-DD) and `surgery_note` (trimmed
  * 1..120 chars) are optional on create. Omit rather than send null; clearing
@@ -107,7 +122,7 @@ export const createPatientSchema = z
   .object({
     external_id: externalIdSchema,
     pathology_code: z.enum(['flexor', 'extensor', 'otros']).optional(),
-    injured_fingers: fingerArraySchema.optional(),
+    injured_fingers: injuredFingersSchema,
     amputated_fingers: fingerArraySchema.optional(),
     surgery_date: isoCalendarDate.optional(),
     surgery_note: surgeryNoteSchema.optional(),
@@ -124,8 +139,8 @@ export type CreatePatientInput = z.infer<typeof createPatientSchema>;
  * Body schema for PATCH /api/doctor/patients/:id (FB-1 + UX-5).
  *
  * The body may carry any NON-EMPTY subset of the clinical-record fields:
- *   - `injured_fingers`:   FingerName[] (FULL REPLACEMENT; send `[]` to clear —
- *                          NO null for arrays)
+ *   - `injured_fingers`:   FingerName[] (FULL REPLACEMENT; D14: must be >= 1
+ *                          when present — clearing to `[]` is NOT allowed)
  *   - `amputated_fingers`: FingerName[] (FULL REPLACEMENT; send `[]` to clear)
  *   - `surgery_date`:      YYYY-MM-DD | null (UX-5; null clears)
  *   - `surgery_note`:      1..120 chars | null (UX-5; null clears)
@@ -141,7 +156,7 @@ export type CreatePatientInput = z.infer<typeof createPatientSchema>;
  */
 export const patchPatientSchema = z
   .object({
-    injured_fingers: fingerArraySchema.optional(),
+    injured_fingers: injuredFingersSchema.optional(),
     amputated_fingers: fingerArraySchema.optional(),
     surgery_date: isoCalendarDate.nullable().optional(),
     surgery_note: surgeryNoteSchema.nullable().optional(),
@@ -222,6 +237,11 @@ export const createSessionSchema = z
           .object({
             rep_index: z.number().int().nonnegative(),
             joint: z.string().min(1).max(16),
+            // D14 (FB-3): the affected finger this measurement belongs to.
+            // Optional/nullable for resilience (e.g. wrist-only or legacy
+            // clients); the camera always sends it for finger joints. The
+            // route maps a missing value to NULL.
+            finger: fingerNameSchema.nullable().optional(),
             max_flexion_deg: z.number().nullable().optional(),
             max_extension_deg: z.number().nullable().optional(),
             quality_flag: z

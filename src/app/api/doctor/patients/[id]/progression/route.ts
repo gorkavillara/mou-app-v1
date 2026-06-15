@@ -76,23 +76,28 @@ export async function GET(
 
   if (rpcErr) return errorResponse('db_error', 500, rpcErr.message);
 
-  // Group by joint → array of { day, max_flexion, max_extension, samples }.
+  // D14 (FB-3): group by (joint, finger) → one series per affected finger and
+  // joint. `finger` is NULL for legacy rows recorded before per-finger
+  // granularity; those collapse into a single null-finger series per joint.
   type Row = {
     day: string;
     joint: string;
+    finger: string | null;
     max_flexion: number | null;
     max_extension: number | null;
     samples: number;
   };
-  const byJoint = new Map<string, Row[]>();
+  const byKey = new Map<string, { joint: string; finger: string | null; points: Row[] }>();
   for (const r of (rows ?? []) as Row[]) {
-    const arr = byJoint.get(r.joint) ?? [];
-    arr.push(r);
-    byJoint.set(r.joint, arr);
+    const key = `${r.joint}__${r.finger ?? ''}`;
+    const entry = byKey.get(key) ?? { joint: r.joint, finger: r.finger, points: [] };
+    entry.points.push(r);
+    byKey.set(key, entry);
   }
 
-  const series = Array.from(byJoint.entries()).map(([joint, points]) => ({
+  const series = Array.from(byKey.values()).map(({ joint, finger, points }) => ({
     joint,
+    finger,
     points: points.map((p) => ({
       day: p.day,
       max_flexion: p.max_flexion,

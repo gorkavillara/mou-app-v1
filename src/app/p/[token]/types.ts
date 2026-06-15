@@ -63,6 +63,10 @@ export type PatientHomePayload = {
 export type RepMeasurementPayload = {
   rep_index: number;
   joint: TrackedJoint;
+  // D14 (FB-3): the affected finger this measurement belongs to. The camera
+  // now records one row per (rep × joint × finger) instead of averaging the
+  // injured fingers into a single value.
+  finger: FingerName;
   max_flexion_deg: number | null;
   max_extension_deg: number | null;
   quality_flag?: QualityFlag;

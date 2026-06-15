@@ -110,13 +110,16 @@ describe('GET /api/doctor/patients/:id/export.csv (B-19)', () => {
               {
                 rep_index: 2,
                 joint: 'PIP-index',
+                finger: 'indice',
                 max_flexion_deg: 92,
                 max_extension_deg: 0,
                 quality_flag: 'clean',
               },
               {
+                // FB-3 / D14: legacy row without a finger → empty CSV cell.
                 rep_index: 1,
                 joint: 'MCP-index',
+                finger: null,
                 max_flexion_deg: 78,
                 max_extension_deg: -2,
                 quality_flag: null,
@@ -150,11 +153,12 @@ describe('GET /api/doctor/patients/:id/export.csv (B-19)', () => {
     const text = new TextDecoder('utf-8').decode(bytes.slice(3));
     const lines = text.split('\r\n').filter((l) => l.length > 0);
     expect(lines[0]).toBe(
-      'patient_external_id,session_id,session_started_at,session_ended_at,exercise_code,prescription_id,sets,reps_per_set,sessions_per_day,rep_index,joint,max_flexion_deg,max_extension_deg,quality_flag',
+      'patient_external_id,session_id,session_started_at,session_ended_at,exercise_code,prescription_id,sets,reps_per_set,sessions_per_day,rep_index,joint,finger,max_flexion_deg,max_extension_deg,quality_flag',
     );
-    // Sorted by (rep_index asc, joint asc) within session.
-    expect(lines[1].startsWith('HC-001,s1,2026-05-08T10:00:00Z,2026-05-08T10:05:00Z,flexion-pasiva-dedos,pr1,3,20,4,1,MCP-index,78,-2,')).toBe(true);
-    expect(lines[2]).toContain(',2,PIP-index,92,0,clean');
+    // Sorted by (rep_index asc, joint asc) within session. FB-3: the `finger`
+    // column sits between joint and max_flexion_deg (empty for legacy rows).
+    expect(lines[1].startsWith('HC-001,s1,2026-05-08T10:00:00Z,2026-05-08T10:05:00Z,flexion-pasiva-dedos,pr1,3,20,4,1,MCP-index,,78,-2,')).toBe(true);
+    expect(lines[2]).toContain(',2,PIP-index,indice,92,0,clean');
   });
 
   it('escapes quotes in external_id correctly (RFC 4180)', async () => {

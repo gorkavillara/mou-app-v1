@@ -107,6 +107,7 @@ export async function POST(
       session_id: session.id,
       rep_index: m.rep_index,
       joint: m.joint,
+      finger: m.finger ?? null,
       max_flexion_deg: m.max_flexion_deg ?? null,
       max_extension_deg: m.max_extension_deg ?? null,
       quality_flag: m.quality_flag ?? null,

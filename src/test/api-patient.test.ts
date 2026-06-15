@@ -448,6 +448,80 @@ describe('POST /api/patient/[token]/sessions (B-12)', () => {
     expect(body.session.completion_pct).toBe(90);
   });
 
+  // FB-3 / D14: each measurement carries the affected finger; the route must
+  // forward it into the rep_measurements insert. When omitted it maps to NULL.
+  it('201 inserts per-finger granularity (finger) and defaults missing finger to null', async () => {
+    handlers['patients:select'] = [
+      () => ({ data: { id: 'p1', discharged_at: null }, error: null }),
+    ];
+    handlers['prescriptions:select'] = [
+      () => ({ data: { id: VALID_UUID, patient_id: 'p1' }, error: null }),
+    ];
+    handlers['sessions:insert'] = [
+      () => ({ data: { id: 's1', completion_pct: 100 }, error: null }),
+    ];
+
+    let insertedRows: Array<Record<string, unknown>> | undefined;
+    handlers['rep_measurements:insert'] = [
+      ({ args }) => {
+        insertedRows = args[0] as Array<Record<string, unknown>>;
+        return { data: null, error: null };
+      },
+    ];
+
+    const bodyWithFinger = {
+      ...validBody,
+      rep_measurements: [
+        {
+          rep_index: 0,
+          joint: 'MCP',
+          finger: 'indice',
+          max_flexion_deg: 80,
+          max_extension_deg: 5,
+          quality_flag: 'clean',
+        },
+        {
+          // No finger → must become null (e.g. wrist-only / legacy client).
+          rep_index: 1,
+          joint: 'wrist',
+          max_flexion_deg: 40,
+          max_extension_deg: -10,
+          quality_flag: 'clean',
+        },
+      ],
+    };
+
+    const req = jsonRequest(
+      `http://localhost:3500/api/patient/${VALID_TOKEN}/sessions`,
+      'POST',
+      bodyWithFinger,
+    );
+    const res = await createSession(req, {
+      params: Promise.resolve({ token: VALID_TOKEN }),
+    });
+    expect(res.status).toBe(201);
+    expect(insertedRows).toBeDefined();
+    expect(insertedRows![0].finger).toBe('indice');
+    expect(insertedRows![1].finger).toBeNull();
+  });
+
+  it('400 on invalid finger value (not a FingerName)', async () => {
+    const req = jsonRequest(
+      `http://localhost:3500/api/patient/${VALID_TOKEN}/sessions`,
+      'POST',
+      {
+        ...validBody,
+        rep_measurements: [
+          { ...validBody.rep_measurements[0], finger: 'thumb' },
+        ],
+      },
+    );
+    const res = await createSession(req, {
+      params: Promise.resolve({ token: VALID_TOKEN }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it('400 on invalid body (missing fields)', async () => {
     const req = jsonRequest(
       `http://localhost:3500/api/patient/${VALID_TOKEN}/sessions`,

@@ -143,6 +143,9 @@ export type ProgressionPoint = {
 
 export type ProgressionSeries = {
   joint: string;
+  // D14 (FB-3): the finger this series belongs to. NULL for legacy rows
+  // recorded before per-finger granularity (aggregated across fingers).
+  finger: FingerName | null;
   points: ProgressionPoint[];
 };
 

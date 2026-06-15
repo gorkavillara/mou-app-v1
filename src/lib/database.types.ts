@@ -143,6 +143,10 @@ export interface Database {
           session_id: string;
           rep_index: number;
           joint: string;
+          // D14 (FB-3): per-finger granularity. One of the 5 Spanish finger
+          // names for new rows; NULL for legacy rows recorded before the
+          // column existed (aggregated across fingers).
+          finger: FingerName | null;
           max_flexion_deg: number | null;
           max_extension_deg: number | null;
           quality_flag: QualityFlag | null;
@@ -203,6 +207,8 @@ export interface Database {
         Returns: {
           day: string;
           joint: string;
+          // D14 (FB-3): per-finger series. NULL for legacy aggregated rows.
+          finger: FingerName | null;
           max_flexion: number | null;
           max_extension: number | null;
           samples: number;

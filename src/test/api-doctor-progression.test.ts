@@ -97,19 +97,22 @@ beforeEach(() => {
 const PATIENT_ID = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa';
 
 describe('GET /api/doctor/patients/:id/progression (B-14)', () => {
-  it('200 happy path: groups rows by joint and falls back to patient.started_at', async () => {
+  it('200 happy path: groups rows by (joint, finger) and falls back to patient.started_at', async () => {
     handlers['patients:select'] = [
       () => ({
         data: { id: PATIENT_ID, started_at: '2026-04-25' },
         error: null,
       }),
     ];
+    // FB-3 / D14: each RPC row now carries `finger`. The route groups by
+    // (joint, finger), so the same joint with two fingers is two series.
     rpcResponses['patient_progression'] = [
       {
         data: [
-          { day: '2026-04-25', joint: 'MCP', max_flexion: 78, max_extension: -2, samples: 14 },
-          { day: '2026-04-26', joint: 'MCP', max_flexion: 82, max_extension: -1, samples: 16 },
-          { day: '2026-04-25', joint: 'PIP', max_flexion: 92, max_extension: 0, samples: 14 },
+          { day: '2026-04-25', joint: 'MCP', finger: 'indice', max_flexion: 78, max_extension: -2, samples: 14 },
+          { day: '2026-04-26', joint: 'MCP', finger: 'indice', max_flexion: 82, max_extension: -1, samples: 16 },
+          { day: '2026-04-25', joint: 'MCP', finger: 'medio', max_flexion: 70, max_extension: -5, samples: 12 },
+          { day: '2026-04-25', joint: 'PIP', finger: 'indice', max_flexion: 92, max_extension: 0, samples: 14 },
         ],
         error: null,
       },
@@ -126,19 +129,57 @@ describe('GET /api/doctor/patients/:id/progression (B-14)', () => {
     const body = await res.json();
     expect(body.from).toBe('2026-04-25');
     expect(typeof body.to).toBe('string');
-    expect(body.series).toHaveLength(2);
+    // (MCP,indice) + (MCP,medio) + (PIP,indice) = 3 series.
+    expect(body.series).toHaveLength(3);
 
-    const mcp = body.series.find((s: { joint: string }) => s.joint === 'MCP');
-    expect(mcp.points).toHaveLength(2);
-    expect(mcp.points[0]).toEqual({
+    const mcpIndex = body.series.find(
+      (s: { joint: string; finger: string | null }) =>
+        s.joint === 'MCP' && s.finger === 'indice',
+    );
+    expect(mcpIndex.points).toHaveLength(2);
+    expect(mcpIndex.points[0]).toEqual({
       day: '2026-04-25',
       max_flexion: 78,
       max_extension: -2,
       samples: 14,
     });
 
+    const mcpMedio = body.series.find(
+      (s: { joint: string; finger: string | null }) =>
+        s.joint === 'MCP' && s.finger === 'medio',
+    );
+    expect(mcpMedio.points).toHaveLength(1);
+
     expect(lastRpcArgs?.name).toBe('patient_progression');
     expect((lastRpcArgs?.args as { p_joints: unknown }).p_joints).toBeNull();
+  });
+
+  it('legacy rows with finger=null collapse into a single null-finger series per joint', async () => {
+    handlers['patients:select'] = [
+      () => ({ data: { id: PATIENT_ID, started_at: '2026-04-25' }, error: null }),
+    ];
+    rpcResponses['patient_progression'] = [
+      {
+        data: [
+          { day: '2026-04-25', joint: 'MCP', finger: null, max_flexion: 60, max_extension: -3, samples: 10 },
+          { day: '2026-04-26', joint: 'MCP', finger: null, max_flexion: 64, max_extension: -2, samples: 11 },
+        ],
+        error: null,
+      },
+    ];
+
+    const req = jsonRequest(
+      `http://localhost:3500/api/doctor/patients/${PATIENT_ID}/progression`,
+      'GET',
+    );
+    const res = await getProgression(req, {
+      params: Promise.resolve({ id: PATIENT_ID }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.series).toHaveLength(1);
+    expect(body.series[0].finger).toBeNull();
+    expect(body.series[0].points).toHaveLength(2);
   });
 
   it('forwards joint filter to the RPC', async () => {

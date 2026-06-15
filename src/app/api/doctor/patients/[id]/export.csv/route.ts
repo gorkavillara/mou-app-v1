@@ -38,6 +38,7 @@ const HEADERS = [
   'sessions_per_day',
   'rep_index',
   'joint',
+  'finger',
   'max_flexion_deg',
   'max_extension_deg',
   'quality_flag',
@@ -58,6 +59,7 @@ type SessionRow = {
   rep_measurements: Array<{
     rep_index: number;
     joint: string;
+    finger: string | null;
     max_flexion_deg: number | null;
     max_extension_deg: number | null;
     quality_flag: string | null;
@@ -113,7 +115,7 @@ export async function GET(
        ended_at,
        prescription_id,
        prescription:prescriptions(id, sets, reps_per_set, sessions_per_day, exercise:exercises(code)),
-       rep_measurements(rep_index, joint, max_flexion_deg, max_extension_deg, quality_flag)`,
+       rep_measurements(rep_index, joint, finger, max_flexion_deg, max_extension_deg, quality_flag)`,
     )
     .eq('patient_id', patientId)
     .order('started_at', { ascending: true });
@@ -152,6 +154,7 @@ export async function GET(
         session.prescription?.sessions_per_day ?? null,
         m.rep_index,
         m.joint,
+        m.finger,
         m.max_flexion_deg,
         m.max_extension_deg,
         m.quality_flag,

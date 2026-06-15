@@ -129,6 +129,8 @@ describe('POST /api/doctor/patients (B-06)', () => {
     const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
       external_id: 'HC-001',
       pathology_code: 'flexor',
+      // D14 (FB-3): injured_fingers is now mandatory (>= 1).
+      injured_fingers: ['menique'],
     });
     const res = await createPatient(req);
     expect(res.status).toBe(201);
@@ -195,41 +197,33 @@ describe('POST /api/doctor/patients (B-06)', () => {
     expect(body.patient.amputated_fingers).toEqual(['pulgar']);
   });
 
-  it('201 defaults missing finger arrays to [] (FB-1)', async () => {
+  it('400 when injured_fingers is omitted (D14 requires >= 1)', async () => {
+    // D14 (FB-3): the doctor MUST mark at least one injured finger — the
+    // injured set drives the goniometer. Omitting it (previously defaulted to
+    // []) is now an invalid body. The insert must never run.
     handlers['patients:insert'] = [
-      ({ args }) => {
-        const row = (args[0] ?? {}) as {
-          injured_fingers?: string[];
-          amputated_fingers?: string[];
-        };
-        expect(row.injured_fingers).toEqual([]);
-        expect(row.amputated_fingers).toEqual([]);
-        return {
-          data: {
-            id: 'p1',
-            doctor_id: authUser!.id,
-            external_id: 'HC-002b',
-            pathology_code: null,
-            injured_fingers: [],
-            amputated_fingers: [],
-            access_token: 'tok-empty',
-            started_at: '2026-05-20',
-            discharged_at: null,
-            created_at: '2026-05-20T10:00:00Z',
-            updated_at: '2026-05-20T10:00:00Z',
-          },
-          error: null,
-        };
+      () => {
+        throw new Error('insert must not run when injured_fingers is missing');
       },
     ];
     const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
       external_id: 'HC-002b',
     });
     const res = await createPatient(req);
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.patient.injured_fingers).toEqual([]);
-    expect(body.patient.amputated_fingers).toEqual([]);
+    expect(body.error).toBe('invalid_body');
+  });
+
+  it('400 when injured_fingers is empty (D14 requires >= 1)', async () => {
+    const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
+      external_id: 'HC-002c',
+      injured_fingers: [],
+    });
+    const res = await createPatient(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('invalid_body');
   });
 
   it('400 when a finger value is invalid (FB-1)', async () => {
@@ -290,6 +284,8 @@ describe('POST /api/doctor/patients (B-06)', () => {
     ];
     const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
       external_id: 'PRUEBA 1',
+      // D14 (FB-3): injured_fingers is now mandatory (>= 1).
+      injured_fingers: ['indice'],
     });
     const res = await createPatient(req);
     expect(res.status).toBe(201);
@@ -387,6 +383,8 @@ describe('POST /api/doctor/patients (B-06)', () => {
     ];
     const req = jsonRequest('http://localhost:3500/api/doctor/patients', 'POST', {
       external_id: 'HC-001',
+      // D14 (FB-3): injured_fingers is now mandatory (>= 1).
+      injured_fingers: ['menique'],
     });
     const res = await createPatient(req);
     expect(res.status).toBe(409);
@@ -675,34 +673,19 @@ describe('PATCH /api/doctor/patients/:id (FB-1)', () => {
     expect(body.patient.amputated_fingers).toEqual(['pulgar']);
   });
 
-  it('clears injured_fingers with [] (200)', async () => {
+  it('400 when clearing injured_fingers to [] (D14 requires >= 1)', async () => {
+    // D14 (FB-3): injured_fingers can no longer be cleared — at least one
+    // injured finger must always remain. The schema rejects [] before any DB
+    // read/write, so neither handler must run.
     handlers['patients:update'] = [
-      ({ args }) => {
-        const row = (args[0] ?? {}) as { injured_fingers?: string[] };
-        expect(row.injured_fingers).toEqual([]);
-        return {
-          data: {
-            id: 'p1',
-            external_id: 'HC-001',
-            pathology_code: 'flexor',
-            injured_fingers: [],
-            amputated_fingers: ['pulgar'],
-            access_token: 'tok-abc',
-            started_at: '2026-05-01',
-            discharged_at: null,
-            created_at: '2026-05-01T10:00:00Z',
-            updated_at: '2026-05-20T10:00:00Z',
-          },
-          error: null,
-        };
+      () => {
+        throw new Error('update must not run when injured_fingers is emptied');
       },
     ];
-    // Single-array PATCH triggers read-modify-validate: stub the current DB row.
     handlers['patients:select'] = [
-      () => ({
-        data: { injured_fingers: ['anular'], amputated_fingers: ['pulgar'] },
-        error: null,
-      }),
+      () => {
+        throw new Error('select must not run when injured_fingers is emptied');
+      },
     ];
     const req = jsonRequest(
       'http://localhost:3500/api/doctor/patients/p1',
@@ -710,9 +693,9 @@ describe('PATCH /api/doctor/patients/:id (FB-1)', () => {
       { injured_fingers: [] },
     );
     const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.patient.injured_fingers).toEqual([]);
+    expect(body.error).toBe('invalid_body');
   });
 
   it('400 fingers_overlap when single-array PATCH overlaps the OTHER array in DB (FB-1)', async () => {
