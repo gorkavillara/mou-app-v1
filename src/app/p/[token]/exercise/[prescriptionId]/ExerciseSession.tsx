@@ -13,6 +13,7 @@ import {
   readHandedness,
   summarizeHandednessSamples,
   updateRepCoaching,
+  type FingerAngles,
   type FingerJointAngles,
   type FingerName,
   type FingerStatusMap,
@@ -134,9 +135,17 @@ const ALL_NORMAL: FingerStatusMap = {
   menique: 'normal',
 };
 
+// FB-3 / IA-13: peaks are now tracked PER FINGER. Each driver finger keeps its
+// own per-joint peak record so the camera persists one row per (rep × finger ×
+// joint) instead of averaging the injured fingers into a single value.
+type JointPeak = { peakFlex: number; peakExt: number };
+type PerFingerPeaks = Partial<
+  Record<FingerName, Partial<Record<TrackedJoint, JointPeak>>>
+>;
+
 type RepRecord = {
   rep_index: number;
-  perJoint: Partial<Record<TrackedJoint, { peakFlex: number; peakExt: number }>>;
+  perFinger: PerFingerPeaks;
   framesTotal: number;
   framesMissing: number;
 };
@@ -257,9 +266,15 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   const [liveAngle, setLiveAngle] = useState(0);
   const [livePeak, setLivePeak] = useState(0);
   const [livePerJoint, setLivePerJoint] = useState<Partial<Record<TrackedJoint, number>>>({});
+  // FB-3 / IA-14: live driver-joint (MCP) angle per injured finger, so the HUD
+  // shows one row per affected finger instead of a single averaged value.
+  const [livePerFinger, setLivePerFinger] = useState<Partial<Record<FingerName, number>>>({});
   const [submitState, setSubmitState] = useState<'idle' | 'pending' | 'ok' | 'error'>('idle');
   const [summary, setSummary] = useState<{
-    perJoint: Partial<Record<TrackedJoint, { avgFlex: number; avgExt: number }>>;
+    // FB-3: per (finger × joint) averaged peaks across all reps.
+    perFinger: Partial<
+      Record<FingerName, Partial<Record<TrackedJoint, { avgFlex: number; avgExt: number }>>>
+    >;
     repsCompleted: number;
   } | null>(null);
 
@@ -291,7 +306,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   const angleHistoryRef = useRef<number[]>([]);
   const currentRepRef = useRef<RepRecord>({
     rep_index: 0,
-    perJoint: {},
+    perFinger: {},
     framesTotal: 0,
     framesMissing: 0,
   });
@@ -322,6 +337,8 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   const displayAngleRef = useRef(0);
   const displayPeakRef = useRef(0);
   const displayPerJointRef = useRef<Partial<Record<TrackedJoint, number>>>({});
+  // FB-3 / IA-14: latest normalized driver-joint angle per driver finger.
+  const displayPerFingerRef = useRef<Partial<Record<FingerName, number>>>({});
 
   // Show a transient toast. Subsequent calls cancel the previous timer so we
   // never stack timers on top of one another.
@@ -401,6 +418,12 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
         const v = displayPerJointRef.current[joint];
         if (v != null) next[joint] = Math.round(v);
       }
+      // FB-3 / IA-14: snapshot the per-finger driver-joint (MCP) angles.
+      const nextFinger: Partial<Record<FingerName, number>> = {};
+      for (const finger of driverFingerNames) {
+        const v = displayPerFingerRef.current[finger];
+        if (v != null) nextFinger[finger] = Math.round(v);
+      }
       setLiveAngle((prev) => (prev === angle ? prev : angle));
       setLivePeak((prev) => (prev === peak ? prev : peak));
       setLivePerJoint((prev) => {
@@ -411,9 +434,16 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
         }
         return changed ? next : prev;
       });
+      setLivePerFinger((prev) => {
+        let changed = false;
+        for (const finger of driverFingerNames) {
+          if ((prev[finger] ?? null) !== (nextFinger[finger] ?? null)) { changed = true; break; }
+        }
+        return changed ? nextFinger : prev;
+      });
     }, DISPLAY_FLUSH_MS);
     return () => window.clearInterval(id);
-  }, [phase, trackedJoints]);
+  }, [phase, trackedJoints, driverFingerNames]);
 
   // Pause loop when tab is hidden.
   useEffect(() => {
@@ -443,43 +473,59 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
 
       const allRaw: FingerJointAngles = calculateAllJointAngles(landmarks);
 
-      // FB-1: the fingers contributing to the rep driver + per-joint peaks are
+      // FB-1: the fingers contributing to the rep driver + per-finger peaks are
       // the resolved driver set (injured fingers, or the target selection minus
       // amputated). If empty (e.g. the only target finger is amputated) there is
       // nothing to measure this frame.
       const fingers = FINGERS.filter((f) => driverFingerNames.includes(f.name));
       if (fingers.length === 0) return;
 
-      // Collect normalized angles per tracked joint.
-      const perJointSamples: Partial<Record<TrackedJoint, number[]>> = {};
-      for (const joint of trackedJoints) {
-        if (joint === 'wrist') continue; // wrist not driven by finger landmarks here
-        const jn = jointFromTracked(joint);
-        const samples: number[] = [];
-        for (const f of fingers) {
-          const raw: JointAngles = allRaw[f.name];
-          const value =
+      // FB-3 / IA-13: collect normalized angles per FINGER × tracked joint and
+      // update each finger's own per-joint peak. We no longer average across
+      // fingers for storage — every driver finger keeps its own record.
+      // `perFingerJoint[finger][joint]` = this frame's normalized angle.
+      const perFingerJoint: Partial<
+        Record<FingerName, Partial<Record<TrackedJoint, number>>>
+      > = {};
+      for (const f of fingers) {
+        const raw: JointAngles = allRaw[f.name];
+        const fingerSlot = rec.perFinger[f.name] ?? {};
+        const jointValues: Partial<Record<TrackedJoint, number>> = {};
+        for (const joint of trackedJoints) {
+          if (joint === 'wrist') continue; // wrist not driven by finger landmarks here
+          const jn = jointFromTracked(joint);
+          const rawValue =
             jn === 'MCP' ? raw.MCP : jn === 'PIP' ? raw.PIP : raw.DIP;
-          samples.push(normalizeJointAngle(value, jn));
-        }
-        perJointSamples[joint] = samples;
-      }
+          const value = normalizeJointAngle(rawValue, jn);
+          jointValues[joint] = value;
 
-      // Update per-rep peaks per joint.
-      for (const joint of trackedJoints) {
-        const samples = perJointSamples[joint];
-        if (!samples || samples.length === 0) continue;
-        const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
-        const slot = rec.perJoint[joint] ?? { peakFlex: 0, peakExt: 0 };
-        if (avg > 0) slot.peakFlex = Math.max(slot.peakFlex, Math.round(avg));
-        if (avg < 0) slot.peakExt = Math.max(slot.peakExt, Math.round(Math.abs(avg)));
-        rec.perJoint[joint] = slot;
+          const slot = fingerSlot[joint] ?? { peakFlex: 0, peakExt: 0 };
+          if (value > 0) slot.peakFlex = Math.max(slot.peakFlex, Math.round(value));
+          if (value < 0) slot.peakExt = Math.max(slot.peakExt, Math.round(Math.abs(value)));
+          fingerSlot[joint] = slot;
+        }
+        rec.perFinger[f.name] = fingerSlot;
+        perFingerJoint[f.name] = jointValues;
       }
 
       // Driver: prefer MCP if available; otherwise the first tracked joint.
       const driverJoint: TrackedJoint =
         trackedJoints.find((j) => j === 'MCP') ?? trackedJoints[0];
-      const driverSamples = perJointSamples[driverJoint] ?? [];
+
+      // FB-3 / IA-14: per-finger driver-joint angle for the live HUD rows.
+      for (const f of fingers) {
+        const v = perFingerJoint[f.name]?.[driverJoint];
+        if (v != null) displayPerFingerRef.current[f.name] = v;
+      }
+
+      // Rep detection still pivots on the AGGREGATE of the driver joint across
+      // the driver fingers (a rep = the whole hand opening/closing). Only the
+      // stored peaks changed to per-finger; the counting logic is unchanged.
+      const driverSamples: number[] = [];
+      for (const f of fingers) {
+        const v = perFingerJoint[f.name]?.[driverJoint];
+        if (v != null) driverSamples.push(v);
+      }
       const driverAvg =
         driverSamples.length > 0
           ? driverSamples.reduce((a, b) => a + b, 0) / driverSamples.length
@@ -501,14 +547,18 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
       const absDisplay = Math.abs(displaySmoothed);
       if (absDisplay > displayPeakRef.current) displayPeakRef.current = absDisplay;
 
-      // Per-joint display values: average smoothing per joint isn't needed
-      // (these are already averaged across fingers). We just write the
-      // latest sample.
+      // Per-joint display values (joint-strip "shape" bars): average across the
+      // driver fingers for the latest frame. No per-frame smoothing needed.
       for (const joint of trackedJoints) {
-        const samples = perJointSamples[joint];
-        if (!samples || samples.length === 0) continue;
-        const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
-        displayPerJointRef.current[joint] = avg;
+        if (joint === 'wrist') continue;
+        const samples: number[] = [];
+        for (const f of fingers) {
+          const v = perFingerJoint[f.name]?.[joint];
+          if (v != null) samples.push(v);
+        }
+        if (samples.length === 0) continue;
+        displayPerJointRef.current[joint] =
+          samples.reduce((a, b) => a + b, 0) / samples.length;
       }
 
       // Rep edge detection: only count once flexion threshold is crossed,
@@ -537,7 +587,17 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
         // Previously `updateRepCoaching` was imported but never invoked, so the
         // surgeon never saw any coaching ("NO SALE NADA DE AVISOS"). Grace is
         // measured against the GLOBAL rep count so it isn't reset each set.
-        const completedPeakFlex = completed.perJoint[driverJoint]?.peakFlex ?? 0;
+        // Average the driver-joint flexion peak across the driver fingers so
+        // coaching reflects the whole hand's effort (same scale as before).
+        const driverFlexPeaks: number[] = [];
+        for (const f of fingers) {
+          const peak = completed.perFinger[f.name]?.[driverJoint]?.peakFlex;
+          if (peak != null) driverFlexPeaks.push(peak);
+        }
+        const completedPeakFlex =
+          driverFlexPeaks.length > 0
+            ? Math.round(driverFlexPeaks.reduce((a, b) => a + b, 0) / driverFlexPeaks.length)
+            : 0;
         const REP_COACHING_GRACE = 3;
         if (globalRepRef.current > REP_COACHING_GRACE) {
           const { state: nextCoaching, suggestion } = updateRepCoaching(
@@ -554,7 +614,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
         // closes; keep it provisional at the next global index here).
         currentRepRef.current = {
           rep_index: globalRepRef.current,
-          perJoint: {},
+          perFinger: {},
           framesTotal: 0,
           framesMissing: 0,
         };
@@ -625,8 +685,16 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     ctx.clearRect(0, 0, rect.width, rect.height);
 
     if (hand) {
-      const fingerAngles = {
-        pulgar: 0, indice: 0, medio: 0, anular: 0, menique: 0,
+      // FB-3 / IA-14: feed the REAL normalized MCP per finger so `drawHand`
+      // paints the per-fingertip label for the injured fingers (it was hard-
+      // coded to 0, so the labels showed nothing). One full map is required.
+      const rawAngles = calculateAllJointAngles(hand);
+      const fingerAngles: FingerAngles = {
+        pulgar: Math.round(normalizeJointAngle(rawAngles.pulgar.MCP, 'MCP')),
+        indice: Math.round(normalizeJointAngle(rawAngles.indice.MCP, 'MCP')),
+        medio: Math.round(normalizeJointAngle(rawAngles.medio.MCP, 'MCP')),
+        anular: Math.round(normalizeJointAngle(rawAngles.anular.MCP, 'MCP')),
+        menique: Math.round(normalizeJointAngle(rawAngles.menique.MCP, 'MCP')),
       };
       drawHand(
         ctx,
@@ -659,31 +727,38 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     if (phaseRef.current !== 'running' && phaseRef.current !== 'resting') return;
     stopLoop();
 
-    // Aggregate per-joint averages across all completed reps.
+    // FB-3: aggregate per (finger × joint) averages across all completed reps.
     const reps = repHistoryRef.current;
-    const perJoint: Partial<Record<TrackedJoint, { avgFlex: number; avgExt: number }>> = {};
-    for (const joint of trackedJoints) {
-      const samplesFlex: number[] = [];
-      const samplesExt: number[] = [];
-      for (const r of reps) {
-        const slot = r.perJoint[joint];
-        if (!slot) continue;
-        samplesFlex.push(slot.peakFlex);
-        samplesExt.push(slot.peakExt);
+    const perFinger: Partial<
+      Record<FingerName, Partial<Record<TrackedJoint, { avgFlex: number; avgExt: number }>>>
+    > = {};
+    for (const finger of driverFingerNames) {
+      const byJoint: Partial<Record<TrackedJoint, { avgFlex: number; avgExt: number }>> = {};
+      for (const joint of trackedJoints) {
+        const samplesFlex: number[] = [];
+        const samplesExt: number[] = [];
+        for (const r of reps) {
+          const slot = r.perFinger[finger]?.[joint];
+          if (!slot) continue;
+          samplesFlex.push(slot.peakFlex);
+          samplesExt.push(slot.peakExt);
+        }
+        if (samplesFlex.length === 0 && samplesExt.length === 0) continue;
+        byJoint[joint] = {
+          avgFlex: samplesFlex.length
+            ? Math.round(samplesFlex.reduce((a, b) => a + b, 0) / samplesFlex.length)
+            : 0,
+          avgExt: samplesExt.length
+            ? Math.round(samplesExt.reduce((a, b) => a + b, 0) / samplesExt.length)
+            : 0,
+        };
       }
-      perJoint[joint] = {
-        avgFlex: samplesFlex.length
-          ? Math.round(samplesFlex.reduce((a, b) => a + b, 0) / samplesFlex.length)
-          : 0,
-        avgExt: samplesExt.length
-          ? Math.round(samplesExt.reduce((a, b) => a + b, 0) / samplesExt.length)
-          : 0,
-      };
+      if (Object.keys(byJoint).length > 0) perFinger[finger] = byJoint;
     }
 
-    setSummary({ perJoint, repsCompleted: repHistoryRef.current.length });
+    setSummary({ perFinger, repsCompleted: repHistoryRef.current.length });
     setPhase('done');
-  }, [stopLoop, trackedJoints]);
+  }, [stopLoop, trackedJoints, driverFingerNames]);
 
   // UX-2 — between sets: pause the rAF loop (stops counting) but KEEP the
   // camera stream alive so resuming is instant. The friendly rest panel is
@@ -707,9 +782,11 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     angleHistoryRef.current = [];
     displayHistoryRef.current = [];
     displayPeakRef.current = 0;
+    displayPerFingerRef.current = {};
+    setLivePerFinger({});
     currentRepRef.current = {
       rep_index: globalRepRef.current,
-      perJoint: {},
+      perFinger: {},
       framesTotal: 0,
       framesMissing: 0,
     };
@@ -728,24 +805,35 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     setSubmitState('pending');
     const reps = repHistoryRef.current;
 
+    // FB-3 / IA-13: one row per (rep × finger × joint). The `finger` field is
+    // now part of the frozen payload contract.
     const measurements: RepMeasurementPayload[] = [];
     for (const r of reps) {
       const lowVisibility = r.framesTotal > 0 && r.framesMissing / r.framesTotal > 0.3;
-      for (const joint of trackedJoints) {
-        const slot = r.perJoint[joint];
-        if (!slot) continue;
-        measurements.push({
-          rep_index: r.rep_index,
-          joint,
-          max_flexion_deg: slot.peakFlex || null,
-          // peakExt is kept as a positive magnitude for the UI, but the DB
-          // contract stores extension as a SIGNED NEGATIVE value: the B-14
-          // aggregation (patient_progression) takes min(max_extension_deg)
-          // to find the deepest extension excursion. Persisting a positive
-          // magnitude would invert that ranking (BUG-4 follow-up, 2026-05-20).
-          max_extension_deg: slot.peakExt ? -slot.peakExt : null,
-          quality_flag: lowVisibility ? 'low_visibility' : 'clean',
-        });
+      for (const finger of driverFingerNames) {
+        const byJoint = r.perFinger[finger];
+        if (!byJoint) continue;
+        for (const joint of trackedJoints) {
+          const slot = byJoint[joint];
+          if (!slot) continue;
+          // Skip joints with no real excursion this rep (both peaks 0) so we
+          // don't persist all-null rows that only inflate the sample count in
+          // patient_progression. Now multiplied per finger, the noise matters.
+          if (!slot.peakFlex && !slot.peakExt) continue;
+          measurements.push({
+            rep_index: r.rep_index,
+            joint,
+            finger,
+            max_flexion_deg: slot.peakFlex || null,
+            // peakExt is kept as a positive magnitude for the UI, but the DB
+            // contract stores extension as a SIGNED NEGATIVE value: the B-14
+            // aggregation (patient_progression) takes min(max_extension_deg)
+            // to find the deepest extension excursion. Persisting a positive
+            // magnitude would invert that ranking (BUG-4 follow-up, 2026-05-20).
+            max_extension_deg: slot.peakExt ? -slot.peakExt : null,
+            quality_flag: lowVisibility ? 'low_visibility' : 'clean',
+          });
+        }
       }
     }
 
@@ -778,7 +866,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
       console.error('[ExerciseSession] submit failed', err);
       setSubmitState('error');
     }
-  }, [prescription.id, targetReps, token, trackedJoints]);
+  }, [prescription.id, targetReps, token, trackedJoints, driverFingerNames]);
 
   // BUG-1 — load the MediaPipe HandLandmarker (GPU, then CPU fallback). Pure
   // async; the camera path runs in parallel with this.
@@ -917,7 +1005,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     repHistoryRef.current = [];
     angleHistoryRef.current = [];
     directionRef.current = null;
-    currentRepRef.current = { rep_index: 0, perJoint: {}, framesTotal: 0, framesMissing: 0 };
+    currentRepRef.current = { rep_index: 0, perFinger: {}, framesTotal: 0, framesMissing: 0 };
     repCoachingRef.current = createRepCoaching();
     handednessSamplesRef.current = [];
     handednessFiredRef.current = false;
@@ -925,10 +1013,12 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     displayAngleRef.current = 0;
     displayPeakRef.current = 0;
     displayPerJointRef.current = {};
+    displayPerFingerRef.current = {};
     setRepCount(0);
     setLiveAngle(0);
     setLivePeak(0);
     setLivePerJoint({});
+    setLivePerFinger({});
     scheduleNextFrame();
   }, [attachAndPlay, loadLandmarker, scheduleNextFrame, stopLoop, stopStream, teardown]);
 
@@ -1021,6 +1111,22 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
           <section className="mt-6 flex justify-center rounded-2xl border border-gray-100 bg-white p-5">
             <ExerciseAnimation exerciseCode={exercise.code} className="h-40 w-40" />
           </section>
+
+          {/* Privacidad — el vídeo se procesa EN EL DISPOSITIVO y nunca se */}
+          {/* graba ni se sube. Solo viajan los datos de la medición (grados y */}
+          {/* repeticiones). El estudio usa identificadores anónimos, sin PII. */}
+          <div
+            data-testid="privacy-notice"
+            className="mt-4 flex items-start gap-2 rounded-2xl border border-[#34C759]/30 bg-[#34C759]/10 p-4 text-[14px] leading-snug text-[#1B5E20]"
+          >
+            <span aria-hidden className="text-[18px] leading-none">🔒</span>
+            <span>
+              <span className="font-semibold">El vídeo no se graba ni se almacena.</span>{' '}
+              La cámara se usa solo en tu móvil para medir el ejercicio en tiempo
+              real. No guardamos imágenes ni ningún dato personal: únicamente los
+              datos de la realización del ejercicio (grados y repeticiones).
+            </span>
+          </div>
 
           {/* UX-3 (surgeon, 2026-05-20) — the angle reads only work when the */}
           {/* hand is in PROFILE, not facing the camera. Prominent callout. */}
@@ -1126,6 +1232,11 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
                 <p className="text-[16px] font-semibold">Preparando cámara…</p>
                 <p className="max-w-[280px] text-[13px] text-white/70">
                   📐 Recuerda colocar la mano DE PERFIL a la cámara.
+                </p>
+                {/* Privacidad: refuerzo en el momento en que se activa la cámara. */}
+                <p className="max-w-[280px] text-[12px] text-white/60">
+                  🔒 El vídeo no se graba ni se almacena. Solo se usa aquí para
+                  medir el ejercicio.
                 </p>
               </>
             )}
@@ -1264,6 +1375,35 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
                     {livePeak}°
                   </span>
                 </div>
+
+                {/* FB-3 / IA-14 — MCP of each injured finger separately, one */}
+                {/* row per finger. Replaces the single averaged value when */}
+                {/* there is more than one driver finger. */}
+                {driverFingerNames.length > 1 ? (
+                  <div
+                    data-testid="live-per-finger"
+                    className="mt-3 space-y-1 border-t border-gray-200/70 pt-2"
+                  >
+                    <div className="text-[10px] uppercase tracking-wider text-gray-500">
+                      MCP por dedo
+                    </div>
+                    {driverFingerNames.map((finger) => (
+                      <div
+                        key={finger}
+                        data-testid="live-finger-row"
+                        data-finger={finger}
+                        className="flex items-center justify-between gap-3 text-[12px]"
+                      >
+                        <span className="font-medium text-gray-700">
+                          {FINGER_LABELS[finger]}
+                        </span>
+                        <span className="font-semibold tabular-nums text-gray-900">
+                          {livePerFinger[finger] ?? 0}°
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -1337,20 +1477,38 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
 
         {summary ? (
           <section className="mt-8 rounded-2xl border border-gray-100 bg-white p-5 text-left">
-            <h2 className="text-[15px] font-semibold text-gray-900">Pico medio por articulación</h2>
-            <ul className="mt-3 space-y-2 text-[14px] text-gray-700">
-              {trackedJoints.map((joint) => {
-                const slot = summary.perJoint[joint];
+            <h2 className="text-[15px] font-semibold text-gray-900">
+              Pico medio por dedo
+            </h2>
+            {/* FB-3: grouped by finger, each finger its own block with the */}
+            {/* per-joint flex/ext averages. */}
+            <div className="mt-3 space-y-4">
+              {driverFingerNames.map((finger) => {
+                const byJoint = summary.perFinger[finger];
+                if (!byJoint) return null;
                 return (
-                  <li key={joint} className="flex items-center justify-between">
-                    <span className="font-medium">{joint}</span>
-                    <span className="tabular-nums text-gray-600">
-                      flex {slot?.avgFlex ?? 0}° · ext {slot?.avgExt ?? 0}°
-                    </span>
-                  </li>
+                  <div key={finger} data-testid="summary-finger" data-finger={finger}>
+                    <h3 className="text-[14px] font-semibold text-gray-900">
+                      {FINGER_LABELS[finger]}
+                    </h3>
+                    <ul className="mt-1.5 space-y-1.5 text-[14px] text-gray-700">
+                      {trackedJoints.map((joint) => {
+                        const slot = byJoint[joint];
+                        if (!slot) return null;
+                        return (
+                          <li key={joint} className="flex items-center justify-between">
+                            <span className="font-medium">{joint}</span>
+                            <span className="tabular-nums text-gray-600">
+                              flex {slot.avgFlex}° · ext {slot.avgExt}°
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
                 );
               })}
-            </ul>
+            </div>
           </section>
         ) : null}
 
