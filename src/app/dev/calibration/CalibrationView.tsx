@@ -53,6 +53,12 @@ type HandLandmarkerInstance = {
   close?: () => void;
 };
 
+/** Image-mode landmarker: a separate instance running in `IMAGE` mode. */
+type HandLandmarkerImageInstance = {
+  detect: (image: HTMLImageElement | HTMLCanvasElement | ImageBitmap) => HandLandmarkerResult;
+  close?: () => void;
+};
+
 const MEDIAPIPE_WASM_URL =
   'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm';
 const HAND_LANDMARKER_MODEL_URL =
@@ -79,6 +85,35 @@ type CapturePoint = {
   raw: number;
   clinical: number;
   capturedAt: string;
+  /** Where the point came from: live camera read-out or an uploaded photo. */
+  source: 'live' | 'photo';
+  /** Original file name when `source === 'photo'`. */
+  fileName?: string;
+};
+
+/**
+ * A photo uploaded by the surgeon and processed by the IMAGE-mode landmarker.
+ * Holds the detection outcome for the finger that was active when it was
+ * processed, plus the clinical angle being entered for it.
+ */
+type ProcessedPhoto = {
+  id: string;
+  fileName: string;
+  /** Object URL of the uploaded image, used for rendering. Revoked on removal. */
+  objectUrl: string;
+  /** The finger the raw MCP was computed for (so we can detect stale photos). */
+  finger: FingerName;
+  /** Raw MCP of the selected finger, or null when no hand was detected. */
+  rawMcp: number | null;
+  /** Detected landmarks (normalised 0..1), kept for the overlay. */
+  landmarks: Point[] | null;
+  /** Natural pixel size of the source image, for the cover remap. */
+  imageW: number;
+  imageH: number;
+  /** Per-photo error (e.g. no hand detected, decode failure). */
+  error: string | null;
+  /** Clinical angle the surgeon wrote for this pose. */
+  clinicalInput: string;
 };
 
 /** Result of the least-squares fit `clinical = m·raw + b`. */
@@ -149,6 +184,11 @@ function drawMcpOverlay(
   canvasH: number,
   videoW: number,
   videoH: number,
+  /**
+   * When the canvas carries CSS `scaleX(-1)` (live video) the text must be
+   * counter-flipped to read normally. For photos (no flip) pass `false`.
+   */
+  flipText = true,
 ) {
   const px = (lm: Point) => toCanvasPx(lm, videoW, videoH, canvasW, canvasH);
   const wrist = px(landmarks[0]);
@@ -207,7 +247,7 @@ function drawMcpOverlay(
   const label = `${Math.round(rawMcp)}° raw`;
   ctx.save();
   ctx.translate(mcp.x, mcp.y - 34);
-  ctx.scale(-1, 1);
+  if (flipText) ctx.scale(-1, 1);
   ctx.font = 'bold 13px ui-monospace, monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -297,10 +337,38 @@ function buildMcpJson(fit: LinearFit): string {
   )}, clinicalMax: ${MCP_CLINICAL_MAX}, clinicalMin: ${MCP_CLINICAL_MIN} },`;
 }
 
+/** Loads a File into a decoded HTMLImageElement (rejects on decode error). */
+function loadImage(objectUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('No se ha podido leer la imagen.'));
+    img.src = objectUrl;
+  });
+}
+
+/** Lazily creates an IMAGE-mode HandLandmarker (GPU → CPU fallback). */
+async function createImageLandmarker(): Promise<HandLandmarkerImageInstance> {
+  const vision = await import('@mediapipe/tasks-vision');
+  const fileset = await vision.FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_URL);
+  const make = async (delegate: 'GPU' | 'CPU') =>
+    (await vision.HandLandmarker.createFromOptions(fileset, {
+      baseOptions: { modelAssetPath: HAND_LANDMARKER_MODEL_URL, delegate },
+      numHands: 1,
+      runningMode: 'IMAGE',
+    })) as unknown as HandLandmarkerImageInstance;
+  try {
+    return await make('GPU');
+  } catch {
+    return await make('CPU');
+  }
+}
+
 export function CalibrationView() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const landmarkerRef = useRef<HandLandmarkerInstance | null>(null);
+  const imageLandmarkerRef = useRef<HandLandmarkerImageInstance | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
 
@@ -327,6 +395,13 @@ export function CalibrationView() {
   const [points, setPoints] = useState<CapturePoint[]>([]);
   const [clinicalInput, setClinicalInput] = useState<string>('');
 
+  // Photo-based calibration: processed uploads + processing state.
+  const [photos, setPhotos] = useState<ProcessedPhoto[]>([]);
+  const photosRef = useRef<ProcessedPhoto[]>([]);
+  photosRef.current = photos;
+  const [processingPhotos, setProcessingPhotos] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const stop = useCallback(() => {
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
@@ -346,7 +421,25 @@ export function CalibrationView() {
     setRunning(false);
   }, []);
 
-  useEffect(() => () => stop(), [stop]);
+  // Closes the image landmarker and revokes any pending photo object URLs.
+  // Used on unmount so we never leak the WASM instance or blob URLs.
+  const cleanupPhotos = useCallback(() => {
+    try {
+      imageLandmarkerRef.current?.close?.();
+    } catch {
+      // ignore
+    }
+    imageLandmarkerRef.current = null;
+    for (const p of photosRef.current) URL.revokeObjectURL(p.objectUrl);
+  }, []);
+
+  useEffect(
+    () => () => {
+      stop();
+      cleanupPhotos();
+    },
+    [stop, cleanupPhotos],
+  );
 
   const renderLoop = useCallback(() => {
     const video = videoRef.current;
@@ -501,6 +594,7 @@ export function CalibrationView() {
       raw,
       clinical,
       capturedAt: new Date().toISOString(),
+      source: 'live',
     };
     setPoints((prev) => [...prev, point].sort((a, b) => a.clinical - b.clinical));
     setClinicalInput('');
@@ -511,13 +605,121 @@ export function CalibrationView() {
   }, []);
 
   // When the target finger changes, the previously captured points belong to a
-  // different finger and would corrupt the fit — clear them.
+  // different finger and would corrupt the fit — clear them. Processed photos
+  // are likewise tied to the finger active at processing time, so we drop them
+  // (and revoke their object URLs) rather than show stale raw MCP values.
   const switchFinger = useCallback((name: FingerName) => {
     setTargetFinger(name);
     setPoints([]);
     setClinicalInput('');
     setError(null);
+    setPhotos((prev) => {
+      for (const p of prev) URL.revokeObjectURL(p.objectUrl);
+      return [];
+    });
   }, []);
+
+  // ----- photo-based calibration -----
+
+  const removePhoto = useCallback((id: string) => {
+    setPhotos((prev) => {
+      const target = prev.find((p) => p.id === id);
+      if (target) URL.revokeObjectURL(target.objectUrl);
+      return prev.filter((p) => p.id !== id);
+    });
+  }, []);
+
+  const setPhotoClinical = useCallback((id: string, value: string) => {
+    setPhotos((prev) => prev.map((p) => (p.id === id ? { ...p, clinicalInput: value } : p)));
+  }, []);
+
+  const handlePhotoFiles = useCallback(
+    async (fileList: FileList | null) => {
+      if (!fileList || fileList.length === 0) return;
+      const files = Array.from(fileList).filter((f) => f.type.startsWith('image/'));
+      if (files.length === 0) {
+        setError('Selecciona archivos de imagen válidos.');
+        return;
+      }
+      setError(null);
+      setProcessingPhotos(true);
+      const finger = targetFingerRef.current;
+      const cfg = FINGERS.find((f) => f.name === finger);
+      try {
+        if (!imageLandmarkerRef.current) {
+          imageLandmarkerRef.current = await createImageLandmarker();
+        }
+        const landmarker = imageLandmarkerRef.current;
+        for (const file of files) {
+          const objectUrl = URL.createObjectURL(file);
+          const base: ProcessedPhoto = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            fileName: file.name,
+            objectUrl,
+            finger,
+            rawMcp: null,
+            landmarks: null,
+            imageW: 0,
+            imageH: 0,
+            error: null,
+            clinicalInput: '',
+          };
+          try {
+            const img = await loadImage(objectUrl);
+            const result = landmarker.detect(img);
+            const hand = result.landmarks?.[0] ?? null;
+            if (!hand || !cfg) {
+              base.error = 'No se ha detectado ninguna mano en la foto.';
+            } else {
+              base.landmarks = hand;
+              base.imageW = img.naturalWidth;
+              base.imageH = img.naturalHeight;
+              base.rawMcp = calculateJointAngles(hand, cfg).MCP;
+            }
+          } catch {
+            base.error = 'No se ha podido procesar la imagen.';
+          }
+          setPhotos((prev) => [...prev, base]);
+        }
+      } catch {
+        setError('No se ha podido cargar el detector de mano para imágenes.');
+      } finally {
+        setProcessingPhotos(false);
+      }
+    },
+    [],
+  );
+
+  // Adds a processed photo (with a valid clinical input) to the shared points
+  // list, tagged as a photo-sourced point so it co-fits with the live captures.
+  const addPhotoPoint = useCallback(
+    (id: string) => {
+      const photo = photosRef.current.find((p) => p.id === id);
+      if (!photo || photo.rawMcp === null) return;
+      // Guard against a stale photo whose finger no longer matches the target.
+      if (photo.finger !== targetFingerRef.current) {
+        setError('Esta foto se procesó para otro dedo. Vuelve a subirla con el dedo actual.');
+        return;
+      }
+      const clinical = Number.parseFloat(photo.clinicalInput.replace(',', '.'));
+      if (!Number.isFinite(clinical)) {
+        setError('Introduce un ángulo clínico válido para la foto (grados, admite negativos).');
+        return;
+      }
+      setError(null);
+      const point: CapturePoint = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        raw: photo.rawMcp,
+        clinical,
+        capturedAt: new Date().toISOString(),
+        source: 'photo',
+        fileName: photo.fileName,
+      };
+      setPoints((prev) => [...prev, point].sort((a, b) => a.clinical - b.clinical));
+      setPhotos((prev) => prev.map((p) => (p.id === id ? { ...p, clinicalInput: '' } : p)));
+    },
+    [],
+  );
 
   const fit = useMemo(() => fitLinear(points), [points]);
   const json = buildMcpJson(fit);
@@ -735,10 +937,11 @@ export function CalibrationView() {
             {/* Captured points list */}
             {points.length > 0 ? (
               <div className="mt-3">
-                <div className="grid grid-cols-[auto_1fr_1fr_auto] items-center gap-x-3 gap-y-1 font-mono text-[12px]">
+                <div className="grid grid-cols-[auto_1fr_1fr_auto_auto] items-center gap-x-3 gap-y-1 font-mono text-[12px]">
                   <span className="font-semibold text-gray-500">#</span>
                   <span className="text-right font-semibold text-gray-500">raw</span>
                   <span className="text-right font-semibold text-gray-500">clínico</span>
+                  <span className="font-semibold text-gray-500">origen</span>
                   <span />
                   {points.map((p, i) => (
                     <PointRow key={p.id} index={i + 1} point={p} onRemove={() => removePoint(p.id)} />
@@ -785,6 +988,58 @@ export function CalibrationView() {
             <pre className="mt-1 overflow-auto rounded-lg bg-gray-900 p-3 text-[11px] leading-snug text-emerald-200">
               {json}
             </pre>
+          </section>
+
+          {/* Photo-based calibration */}
+          <section className="mt-3 rounded-2xl border border-gray-200 bg-white p-4 text-[13px]">
+            <h2 className="text-[14px] font-semibold">Calibración por foto</h2>
+            <p className="mt-1 text-[12px] leading-relaxed text-gray-600">
+              Sube fotos de la mano <strong>de perfil</strong>, con el{' '}
+              <strong>{targetConfig.label.toLowerCase()}</strong> completo y visible
+              (igual que la medición en vivo: si no es de perfil, el ángulo no es
+              comparable). Por cada foto verás el overlay del MCP medido; escribe el
+              ángulo clínico que anotó el cirujano y añádelo a los mismos puntos del
+              ajuste.
+            </p>
+            <p className="mt-2 rounded-lg bg-blue-50 p-2 text-[12px] leading-relaxed text-blue-800">
+              Las fotos se procesan para el dedo seleccionado ahora mismo
+              (<strong>{targetConfig.label}</strong>). Si cambias de dedo, las fotos
+              y los puntos se reinician.
+            </p>
+
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(e) => {
+                  void handlePhotoFiles(e.target.files);
+                  e.target.value = '';
+                }}
+                className="block w-full text-[12px] text-gray-700 file:mr-3 file:h-9 file:cursor-pointer file:rounded-xl file:border-0 file:bg-[#007AFF] file:px-4 file:text-[13px] file:font-semibold file:text-white"
+              />
+            </div>
+            {processingPhotos ? (
+              <p className="mt-2 text-[12px] text-gray-500">Procesando imágenes…</p>
+            ) : null}
+
+            {photos.length > 0 ? (
+              <div className="mt-3 space-y-3">
+                {photos.map((photo) => (
+                  <PhotoCard
+                    key={photo.id}
+                    photo={photo}
+                    finger={targetConfig}
+                    onClinicalChange={(v) => setPhotoClinical(photo.id, v)}
+                    onAddPoint={() => addPhotoPoint(photo.id)}
+                    onRemove={() => removePhoto(photo.id)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-[12px] text-gray-400">Sin fotos subidas todavía.</p>
+            )}
           </section>
         </aside>
 
@@ -843,11 +1098,21 @@ function PointRow({
   point: CapturePoint;
   onRemove: () => void;
 }) {
+  const isPhoto = point.source === 'photo';
   return (
     <>
       <span className="text-gray-500">{index}</span>
       <span className="text-right tabular-nums text-gray-700">{point.raw.toFixed(1)}°</span>
       <span className="text-right tabular-nums text-gray-900">{point.clinical.toFixed(1)}°</span>
+      <span
+        className={
+          'rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ' +
+          (isPhoto ? 'bg-purple-100 text-purple-700' : 'bg-emerald-100 text-emerald-700')
+        }
+        title={isPhoto ? point.fileName : 'En vivo'}
+      >
+        {isPhoto ? 'foto' : 'vivo'}
+      </span>
       <button
         type="button"
         onClick={onRemove}
@@ -857,5 +1122,127 @@ function PointRow({
         ✕
       </button>
     </>
+  );
+}
+
+function PhotoCard({
+  photo,
+  finger,
+  onClinicalChange,
+  onAddPoint,
+  onRemove,
+}: {
+  photo: ProcessedPhoto;
+  finger: FingerConfig;
+  onClinicalChange: (value: string) => void;
+  onAddPoint: () => void;
+  onRemove: () => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Render the image + MCP overlay onto the card canvas (no mirror flip).
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = canvas.clientWidth || 320;
+    const aspect = photo.imageH > 0 ? photo.imageW / photo.imageH : 4 / 3;
+    const cssH = Math.round(cssW / (aspect || 4 / 3));
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    canvas.style.height = `${cssH}px`;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    const img = new Image();
+    let cancelled = false;
+    img.onload = () => {
+      if (cancelled) return;
+      // Cover draw of the image to fill the canvas (mirrors toCanvasPx remap).
+      const scale = Math.max(cssW / img.naturalWidth, cssH / img.naturalHeight);
+      const drawW = img.naturalWidth * scale;
+      const drawH = img.naturalHeight * scale;
+      const offX = (cssW - drawW) / 2;
+      const offY = (cssH - drawH) / 2;
+      ctx.drawImage(img, offX, offY, drawW, drawH);
+
+      if (photo.landmarks && photo.rawMcp !== null) {
+        drawMcpOverlay(
+          ctx,
+          photo.landmarks,
+          finger,
+          photo.rawMcp,
+          cssW,
+          cssH,
+          photo.imageW,
+          photo.imageH,
+          false, // photos are not mirrored — draw text the normal way
+        );
+      }
+    };
+    img.src = photo.objectUrl;
+    return () => {
+      cancelled = true;
+    };
+  }, [photo.objectUrl, photo.landmarks, photo.rawMcp, photo.imageW, photo.imageH, finger]);
+
+  return (
+    <div className="rounded-xl border border-gray-200 p-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-[12px] font-medium text-gray-700" title={photo.fileName}>
+          {photo.fileName}
+        </span>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="shrink-0 text-[12px] text-red-500 hover:text-red-700"
+          aria-label={`Quitar foto ${photo.fileName}`}
+        >
+          ✕
+        </button>
+      </div>
+
+      {photo.error ? (
+        <p className="mt-2 rounded-lg bg-red-50 p-2 text-[12px] text-red-700">{photo.error}</p>
+      ) : (
+        <>
+          <canvas
+            ref={canvasRef}
+            className="mt-2 w-full rounded-lg bg-black"
+          />
+          <div className="mt-2 flex items-end gap-2">
+            <div className="rounded-lg bg-gray-50 px-2 py-1 text-center">
+              <p className="text-[10px] uppercase tracking-wide text-gray-500">MCP crudo</p>
+              <p className="font-mono text-[15px] font-semibold tabular-nums text-gray-900">
+                {photo.rawMcp !== null ? `${photo.rawMcp.toFixed(1)}°` : '—'}
+              </p>
+            </div>
+            <label className="flex-1">
+              <span className="block text-[10px] text-gray-500">Ángulo clínico (°)</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.1"
+                value={photo.clinicalInput}
+                onChange={(e) => onClinicalChange(e.target.value)}
+                placeholder="p.ej. 0, 45, 90"
+                className="mt-1 h-9 w-full rounded-xl border border-gray-200 px-2 text-[13px] tabular-nums outline-none focus:border-[#007AFF]"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={photo.rawMcp === null || photo.clinicalInput.trim() === ''}
+              onClick={onAddPoint}
+              className="h-9 rounded-xl bg-[#007AFF] px-3 text-[12px] font-semibold text-white disabled:bg-gray-200 disabled:text-gray-500"
+            >
+              Añadir punto
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
