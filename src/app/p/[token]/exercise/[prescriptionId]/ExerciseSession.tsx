@@ -1084,7 +1084,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
             <p className="text-[13px] font-medium uppercase tracking-wider text-[#007AFF]">
               Ejercicio
             </p>
-            <h1 className="mt-2 text-[32px] font-semibold leading-tight tracking-tight">
+            <h1 className="mt-2 text-[32px] font-semibold leading-tight tracking-tight text-gray-900">
               {exercise.name}
             </h1>
             {/* UX-1 — spell the dose out in full ("3 series de 20 */}
@@ -1149,7 +1149,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
             <ul className="mt-3 space-y-2 text-[14px] text-gray-600">
               <li>• Coloca el móvil estable, a unos 30–40 cm de tu mano.</li>
               <li>• Asegúrate de tener buena luz frontal.</li>
-              <li>• Apoya el antebrazo sobre la mesa para que la imagen no tiemble.</li>
+              <li>• Apoya el codo en la mesa con el antebrazo en vertical, para que la imagen no tiemble.</li>
             </ul>
           </section>
           {permissionError ? (

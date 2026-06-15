@@ -3,69 +3,20 @@
 /**
  * IA-07 / F-12 — Animated guide for "Flexión pasiva de dedos".
  *
- * Stylised SVG of a hand whose fingers bend toward the palm (flexion) and
- * extend back, looping every 3s. We avoid drawing the contralateral helping
- * hand on purpose — the second hand muddies the silhouette and the helper
- * action is conveyed by the description text on the prescription card.
+ * Realistic, lightly-shaded anatomical hand whose fingers bend gently toward
+ * the palm (assisted flexion) and hold there before easing back open, looping
+ * ~3s. The "passive / assisted" feel is conveyed by a slow ease and a clear
+ * hold at full flexion (vs. the snappier active variants).
  *
- * Implementation notes:
- *  - We use SMIL (`<animateTransform>`) for the finger bends because it
- *    composes cleanly per finger, runs without React state, and auto-pauses
- *    when the SVG is offscreen on most engines. SMIL is supported on every
- *    browser we target (Safari iOS 12+, Chromium, Firefox).
- *  - Each finger pivots around its MCP knuckle. A single sine-eased rotation
- *    is enough to read as "opening / closing" without animating PIP/DIP
- *    individually — the designer can replace this whole component with a
- *    Lottie file later.
- *  - `prefers-reduced-motion` is respected via a CSS media query that pins
- *    each animated transform at 0deg.
+ * Technique (same family as `GenericHand`):
+ *  - Filled palm with radial gradient for volume + rounded "phalange" capsules
+ *    per finger so the silhouette reads as a real hand, not stick lines.
+ *  - Pure CSS keyframes inside the SVG. Each finger is a `<g>` rotated around
+ *    its MCP knuckle via `transform-box: view-box` + absolute `transform-origin`.
+ *    No JS, no SMIL — 60fps-friendly.
+ *  - Small per-finger stagger; `prefers-reduced-motion` pins fingers flat.
+ *  - All ids prefixed `fp-` so this can mount alongside other animations.
  */
-
-const HOLD_DUR = '3s';
-
-type FingerSpec = {
-  /** Knuckle pivot in SVG coords. */
-  cx: number;
-  cy: number;
-  /** End angle for full flexion. */
-  flex: number;
-  /** Phase offset — small stagger feels more natural than perfectly synced fingers. */
-  begin: string;
-  /** Path of the finger in extended position (pivot at cx,cy). */
-  path: string;
-};
-
-// Coordinates are tuned for a 240x240 viewBox with the wrist near the bottom
-// and fingertips near the top. Stylised, not anatomically perfect.
-const FINGERS: FingerSpec[] = [
-  // index
-  {
-    cx: 92, cy: 120, flex: 75, begin: '0s',
-    path: 'M 92 120 L 90 50',
-  },
-  // middle
-  {
-    cx: 116, cy: 116, flex: 80, begin: '0.05s',
-    path: 'M 116 116 L 116 40',
-  },
-  // ring
-  {
-    cx: 140, cy: 120, flex: 75, begin: '0.1s',
-    path: 'M 140 120 L 142 50',
-  },
-  // pinky
-  {
-    cx: 162, cy: 128, flex: 70, begin: '0.15s',
-    path: 'M 162 128 L 168 70',
-  },
-];
-
-// Thumb behaves differently — it abducts/flexes around its own pivot.
-const THUMB = {
-  cx: 70, cy: 140,
-  flex: -40,
-  path: 'M 70 140 L 50 100',
-};
 
 export function FlexionPasivaDedos({ className }: { className?: string }) {
   return (
@@ -73,68 +24,73 @@ export function FlexionPasivaDedos({ className }: { className?: string }) {
       className={className}
       viewBox="0 0 240 240"
       role="img"
-      aria-label="Animación: flexión pasiva de dedos"
+      aria-label="Animación: flexión pasiva de dedos hacia la palma"
       xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      stroke="#007AFF"
-      strokeWidth={6}
-      strokeLinecap="round"
-      strokeLinejoin="round"
     >
       <style>{`
+        .fp-finger { transform-box: view-box; transform: rotate(0deg); }
+        .fp-f-index  { transform-origin: 88px 132px;  animation: fp-flex 3s cubic-bezier(.37,0,.3,1) infinite; }
+        .fp-f-middle { transform-origin: 116px 130px; animation: fp-flex 3s cubic-bezier(.37,0,.3,1) infinite; animation-delay: .07s; }
+        .fp-f-ring   { transform-origin: 142px 132px; animation: fp-flex 3s cubic-bezier(.37,0,.3,1) infinite; animation-delay: .14s; }
+        .fp-f-pinky  { transform-origin: 166px 138px; animation: fp-flex 3s cubic-bezier(.37,0,.3,1) infinite; animation-delay: .21s; }
+        .fp-f-thumb  { transform-origin: 78px 150px;  animation: fp-thumb 3s cubic-bezier(.37,0,.3,1) infinite; }
+
+        @keyframes fp-flex {
+          0%, 14%   { transform: rotate(0deg); }
+          46%, 66%  { transform: rotate(72deg); }
+          94%, 100% { transform: rotate(0deg); }
+        }
+        @keyframes fp-thumb {
+          0%, 14%   { transform: rotate(0deg); }
+          46%, 66%  { transform: rotate(22deg); }
+          94%, 100% { transform: rotate(0deg); }
+        }
         @media (prefers-reduced-motion: reduce) {
-          .mou-anim animateTransform { display: none; }
-          .mou-finger { transform: none !important; }
+          .fp-finger { animation: none !important; transform: rotate(0deg) !important; }
         }
       `}</style>
-      {/* Palm */}
-      <path
-        d="M 70 140 Q 60 175 90 200 L 170 200 Q 188 180 178 140 Q 178 130 168 128 Q 158 130 158 140 L 158 122 Q 158 110 148 110 Q 138 110 138 122 L 138 116 Q 138 104 128 104 Q 118 104 118 116 L 118 122 Q 118 110 108 110 Q 98 110 98 122 L 98 130 Q 88 130 86 140 Q 80 140 70 140 Z"
-        fill="#007AFF"
-        fillOpacity={0.06}
-        stroke="none"
-      />
-      {/* Wrist line */}
-      <path d="M 80 200 L 175 200" />
 
-      <g className="mou-anim">
-        {/* Thumb */}
-        <g className="mou-finger">
-          <path d={THUMB.path} />
-          <animateTransform
-            attributeName="transform"
-            type="rotate"
-            from={`0 ${THUMB.cx} ${THUMB.cy}`}
-            to={`0 ${THUMB.cx} ${THUMB.cy}`}
-            values={`0 ${THUMB.cx} ${THUMB.cy};${THUMB.flex} ${THUMB.cx} ${THUMB.cy};0 ${THUMB.cx} ${THUMB.cy}`}
-            keyTimes="0;0.5;1"
-            dur={HOLD_DUR}
-            repeatCount="indefinite"
-            calcMode="spline"
-            keySplines="0.4 0 0.2 1; 0.4 0 0.2 1"
+      <defs>
+        <radialGradient id="fp-skin" cx="42%" cy="34%" r="78%">
+          <stop offset="0%" stopColor="#FBE7DA" />
+          <stop offset="55%" stopColor="#F2CDB6" />
+          <stop offset="100%" stopColor="#E0AE92" />
+        </radialGradient>
+        <linearGradient id="fp-finger-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#FBE3D4" />
+          <stop offset="100%" stopColor="#EBBC9F" />
+        </linearGradient>
+      </defs>
+
+      <g fill="url(#fp-skin)" stroke="#C98E6F" strokeWidth={2.5} strokeLinejoin="round">
+        <path d="M 70 138 Q 62 170 76 192 Q 92 214 124 212 Q 162 210 174 186 Q 182 168 178 142 Q 176 128 168 128 Q 160 128 158 140 L 158 150 Q 120 156 84 150 Q 76 140 70 138 Z" />
+
+        <g className="fp-finger fp-f-thumb">
+          <path
+            d="M 80 150 Q 64 132 54 112 Q 50 102 58 98 Q 66 95 72 104 Q 84 124 92 142 Z"
+            fill="url(#fp-finger-grad)"
           />
         </g>
 
-        {/* Long fingers */}
-        {FINGERS.map((f, i) => (
-          <g key={i} className="mou-finger">
-            <path d={f.path} />
-            <animateTransform
-              attributeName="transform"
-              type="rotate"
-              from={`0 ${f.cx} ${f.cy}`}
-              to={`0 ${f.cx} ${f.cy}`}
-              values={`0 ${f.cx} ${f.cy};${f.flex} ${f.cx} ${f.cy};0 ${f.cx} ${f.cy}`}
-              keyTimes="0;0.5;1"
-              dur={HOLD_DUR}
-              begin={f.begin}
-              repeatCount="indefinite"
-              calcMode="spline"
-              keySplines="0.4 0 0.2 1; 0.4 0 0.2 1"
-            />
-          </g>
-        ))}
+        <g className="fp-finger fp-f-index">
+          <rect x="79" y="58" width="20" height="78" rx="10" fill="url(#fp-finger-grad)" />
+          <line x1="80" y1="92" x2="98" y2="92" stroke="#D7A488" strokeWidth={1.5} />
+        </g>
+        <g className="fp-finger fp-f-middle">
+          <rect x="107" y="48" width="20" height="86" rx="10" fill="url(#fp-finger-grad)" />
+          <line x1="108" y1="86" x2="126" y2="86" stroke="#D7A488" strokeWidth={1.5} />
+        </g>
+        <g className="fp-finger fp-f-ring">
+          <rect x="133" y="56" width="20" height="80" rx="10" fill="url(#fp-finger-grad)" />
+          <line x1="134" y1="92" x2="152" y2="92" stroke="#D7A488" strokeWidth={1.5} />
+        </g>
+        <g className="fp-finger fp-f-pinky">
+          <rect x="158" y="76" width="18" height="66" rx="9" fill="url(#fp-finger-grad)" />
+          <line x1="159" y1="106" x2="175" y2="106" stroke="#D7A488" strokeWidth={1.5} />
+        </g>
       </g>
+
+      <rect x="84" y="206" width="72" height="14" rx="7" fill="#007AFF" fillOpacity={0.9} />
     </svg>
   );
 }
