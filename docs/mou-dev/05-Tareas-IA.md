@@ -61,6 +61,34 @@ Mostrar en pantalla durante el ejercicio el ángulo actual y el pico de la rep e
 Si el paciente no llega al rango mínimo en 3 reps consecutivas, pop-up: *"Intenta llegar más lejos. Está bien si te ayudas con la otra mano."*
 - Cuidado de no ser molesto: solo en flexión pasiva (donde la ayuda es la indicación).
 
+## P0 — FB-3 (2026-06-15, D14): MCP por dedo, sin promediar
+
+> Feedback del dueño, bloqueante para el piloto. Ver [[02-Decisiones-clave#D14]] y [[tests/feedback-gorka-2026-06-15]].
+
+### IA-13 [P0] Cámara: MCP por dedo afectado, por separado
+- La cámara muestra el **MCP normalizado de cada dedo lesionado por separado**, no promediado.
+- Revivir las etiquetas por-dedo del canvas (hoy alimentadas con `0`, placeholder muerto) con el MCP normalizado real.
+- Quitar el "driver = media de los lesionados": ya no se promedia entre dedos.
+- Los antiguos amputados se miden como lesionados (D14): no excluir ningún dedo afectado.
+
+### IA-14 [P0] Payload de sesión por dedo
+- Construir los `rep_measurements` con la dimensión **dedo** (`finger`) por cada articulación medida (consume B-22).
+- Un MCP por dedo afectado por rep; sin agregación entre dedos en el cliente.
+
+## Fase 2 — ROM completo por articulación (D15)
+
+> **Fase 2, no piloto.** No bloquea el piloto. Base: [[02-Decisiones-clave#D15]], que se apoya en FB-3 ([[02-Decisiones-clave#D14]]) y [[02-Decisiones-clave#D11]]. La BD y el pipeline ya quedan listos en FB-3 (granularidad rep × articulación × dedo); aquí se extiende de "sólo MCP" a todas las articulaciones del dedo afectado.
+
+### IA-15 [P2] Cámara: MCP+PIP+DIP por dedo afectado
+- Extender FB-3 (IA-13) de medir **sólo el MCP** a medir **MCP + PIP + DIP** de cada dedo lesionado, por separado y sin promediar entre dedos.
+- Reutilizar `calculateAllJointAngles` (ya calcula las 3) + `normalizeJointAngle`; los ejercicios sembrados ya traen `tracked_joints = {MCP, PIP, DIP}`.
+- Seguir monitorizando **únicamente los dedos afectados** (no los sanos).
+
+### IA-16 [P2] HUD de las 3 articulaciones por dedo afectado
+- Mostrar en pantalla el ROM de **MCP/PIP/DIP** de cada dedo afectado de forma legible (sin saturar el HUD).
+- Extiende el indicador en vivo (F-13/IA-08, hoy centrado en una articulación) a las 3 articulaciones × dedo lesionado.
+- Construir los `rep_measurements` con las 3 articulaciones por dedo (la dimensión `finger` ya existe desde FB-3 / B-22).
+
 ## P2 — Avanzado
 
 ### IA-10 [P2] Estimación de calidad de movimiento

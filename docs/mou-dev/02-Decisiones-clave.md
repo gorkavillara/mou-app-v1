@@ -66,3 +66,26 @@
 **Decisión**: Antes de captar los 20 pacientes, redactar un **email/documento dirigido al director médico** explicando: qué hace el sistema, qué datos captura, base legal, retención, contacto.
 **Por qué**: *"Aquí hay datos comprometen a la gente. […] Tienes que presentar como un documento de que tú vas a hacer algo. Por lo menos los mando por email y ya tienen el [registro]"*.
 **No bloqueante** para el desarrollo, pero sí para el día del despliegue del piloto.
+
+## D14 — Goniómetro: MCP por dedo, sin promediar (feedback FB-3, 2026-06-15)
+**Decisión**: Reescribir cómo se mide y se guarda el goniómetro cuando hay varios dedos afectados. Cinco cambios acoplados (ver [[tests/feedback-gorka-2026-06-15]]):
+1. **MCP por dedo afectado, por separado**. El ángulo clínicamente relevante es el **metacarpofalángico (MCP)** del dedo lesionado. La cámara muestra el MCP de **cada** dedo afectado por separado, **no promediado**. (Hoy las etiquetas por-dedo del canvas existen pero están alimentadas con `0` —placeholder muerto—; hay que revivirlas con el MCP normalizado real.)
+2. **Persistencia por dedo** ("guardar por dedo, correcto"). `rep_measurements` gana la dimensión **dedo** (nueva columna `finger`). La granularidad pasa de (rep × articulación) a (rep × articulación × dedo). `patient_progression` agrupa también por dedo (filtro de dedo opcional, retrocompatible con filas `finger NULL`). El panel del doctor muestra la progresión **por dedo** (una serie de ROM por dedo afectado).
+3. **Selección obligatoria de ≥1 dedo lesionado**. En el panel del doctor pasa a ser **obligatorio** marcar al menos un dedo lesionado, al crear y al editar paciente (`injured_fingers.length >= 1`). Reforzado en backend (Zod `createPatientSchema` / `patchPatientSchema`) y en UI (NewPatientDialog + FingerStatusControl).
+4. **Picker simplificado a N/L**. El selector de estado de dedos pasa de N/L/A (Normal/Lesionado/Amputado) a solo **N/L** (Normal/Lesionado). Se retira la opción **Amputado** del UI. Los antiguos "amputados" se tratan como **lesionados**: se **miden** igual, ya no se excluyen. La columna `amputated_fingers` **permanece en la BD pero queda sin uso** (siempre vacía desde el UI); no se elimina para no tocar esquema ni validaciones existentes.
+
+**Por qué**: clínicamente es incorrecto **promediar** el MCP de dos dedos afectados con ROM distinto en un único número (es lo que hace hoy, tanto en cámara como en `rep_measurements`). Además, la selección de dedos afectados era opcional: sin marcar ninguno se promediaba el MCP de los 4 dedos largos, mezclando sanos y afectados. Feedback del dueño (Gorka, 2026-06-15), **bloqueante para el piloto**.
+
+**Nota — revierte parcialmente FB-1**: la D14 retira el estado **Amputado** que FB-1 (2026-06-06) había introducido (picker N/L/A, `amputated_fingers[]` excluidos de la medición, pintados en gris discontinuo). A partir de FB-3 todo dedo afectado es "lesionado" y se mide; `amputated_fingers` queda deprecada/sin uso. Se deja rastro explícito de este cambio de criterio.
+
+## D15 — [Fase 2] ROM completo por articulación de los dedos afectados (sólo afectados)
+> **Esta es una decisión de Fase 2, no de piloto.** No bloquea el piloto de 20 pacientes. Base técnica: [[02-Decisiones-clave#D14]] (FB-3) y [[02-Decisiones-clave#D11]].
+
+**Decisión (propuesta del dueño, 2026-06-15)**: en Fase 2, medir y registrar el **ROM completo por articulación** —**MCP + PIP + DIP** de cada dedo, y valorar también la **muñeca**— pero **monitorizando únicamente el/los dedo(s) afectado(s)**. Es decir: rehabilitación articular completa de cada dedo lesionado (no sólo el MCP), restringida a los dedos marcados como lesionados.
+
+**Por qué**: en Fase 1 (FB-3/D14) sólo se mide y muestra el **MCP** por dedo afectado, porque es el ángulo clínicamente prioritario y suficiente para arrancar el piloto. Pero para flexor profundo la **DIP** importa, y para una rehabilitación articular completa hace falta el ROM de las tres articulaciones del dedo lesionado. El lib ya calcula MCP/PIP/DIP (`calculateAllJointAngles`) y los normaliza (`normalizeJointAngle`); los ejercicios sembrados ya tienen `tracked_joints = {MCP, PIP, DIP}`. **D14/FB-3 deja además la BD y el pipeline listos** (granularidad rep × articulación × dedo en `rep_measurements.finger`), por lo que esta Fase 2 es sobre todo **superficie clínica/UI** (mostrar el ROM completo por articulación×dedo afectado) + **validación clínica** de la calibración de PIP/DIP (y de muñeca, hoy un placeholder sin referencia de antebrazo), no cambios de modelo de datos.
+
+**Alcance acoplado** (ver tareas [P2] Fase 2 en los backlogs):
+1. **IA**: extender la medición de FB-3 de "sólo MCP" a **MCP+PIP+DIP** por cada dedo afectado, en cámara y en el payload; HUD que muestre las 3 articulaciones por dedo afectado de forma legible.
+2. **Frontend doctor**: visualizar la progresión de ROM **por articulación×dedo afectado** (no sólo MCP) en el panel; informe/PDF con ROM completo por dedo afectado.
+3. **OPS/clínica**: validación con **goniómetro** de la calibración de **PIP y DIP** (y decidir si se mide la **muñeca** y cómo, dado que hoy su calibración es un placeholder sin referencia de antebrazo). Depende de la sesión clínica con Javi (cirujano), a quien sólo se le pide **validación clínica**, nunca tareas técnicas.

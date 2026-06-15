@@ -83,6 +83,37 @@ Mientras la cámara graba, mostrar overlay: *"Flexión actual: 78°"* — útil 
 - Logo Mou.
 - Pie: ID paciente + fecha alta.
 
+## P0 — FB-3 (2026-06-15, D14): goniómetro por dedo
+
+> Feedback del dueño, bloqueante para el piloto. Ver [[02-Decisiones-clave#D14]] y [[tests/feedback-gorka-2026-06-15]].
+
+### F-17 [P0] Picker de dedos N/L (retirar Amputado)
+- `FingerStatusControl` pasa de N/L/A a solo **N/L** (Normal/Lesionado). Quitar la opción Amputado.
+- Los antiguos amputados se tratan como lesionados. El UI deja de escribir `amputated_fingers` (siempre vacío).
+- Aplica también al selector dentro de NewPatientDialog.
+
+### F-18 [P0] Obligatorio ≥1 dedo lesionado (alta + edición)
+- En NewPatientDialog y en FingerStatusControl: no permitir guardar sin **al menos 1 dedo lesionado** (`injured_fingers.length >= 1`).
+- Mensaje de validación claro + botón de guardar deshabilitado hasta cumplir.
+- Espejo de la validación de backend (B-23).
+
+### F-19 [P0] Progresión angular **por dedo** en el panel del doctor
+- El gráfico Recharts de progresión (F-05 §5) pasa a dibujar **una serie de ROM por dedo afectado** (consumiendo B-21).
+- Selector/leyenda por dedo; foco en el MCP (dato clínico de la D14).
+
+## Fase 2 — ROM completo por articulación (D15)
+
+> **Fase 2, no piloto.** No bloquea el piloto. Base: [[02-Decisiones-clave#D15]] (se apoya en FB-3 / [[02-Decisiones-clave#D14]]). La progresión por dedo del panel ya llega en F-19 (FB-3); aquí se amplía de "sólo MCP" a todas las articulaciones del dedo afectado.
+
+### F-20 [P2] Progresión de ROM por articulación × dedo afectado
+- Ampliar el gráfico de progresión (F-05 §5, ya por dedo desde F-19) para mostrar **una serie por articulación (MCP/PIP/DIP) × dedo afectado**, no sólo el MCP.
+- Selector/leyenda por articulación y por dedo; evitar saturar el gráfico (filtros por defecto sensatos).
+- Sólo dedos afectados, coherente con la D15.
+
+### F-21 [P2] Informe/PDF con ROM completo por dedo afectado
+- El informe del paciente (export PDF) incluye el **ROM por articulación (MCP/PIP/DIP) de cada dedo afectado**, no sólo el MCP.
+- Estructura por dedo afectado → sus 3 articulaciones, con el rango clínico alcanzado.
+
 ## P2 — Refinamientos
 
 ### F-15 [P2] Modo oscuro en panel doctor

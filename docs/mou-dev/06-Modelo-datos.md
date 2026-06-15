@@ -37,8 +37,8 @@ Seed inicial: 2 filas (los 2 ejercicios de la D4).
 | `doctor_id` | uuid FK→doctors | |
 | `external_id` | text | Nº historia clínica O correlativo. Único por doctor. |
 | `pathology_code` | text | Opcional: `flexor`, `extensor`, `otros`. **No** descripciones libres. |
-| `injured_fingers` | text[] NOT NULL DEFAULT `'{}'` | **FB-1 (2026-06-06)**: dedos **lesionados** (varios posibles): `pulgar`, `indice`, `medio`, `anular`, `menique`. Se MIDEN (driver de la medición = media de los lesionados) y se pintan **naranja**. `[]` = ninguno → fallback al `target_finger` del ejercicio excluyendo amputados. Valores idénticos a `FingerName` en `src/lib/hand-tracking.ts`. CHECK `injured_fingers <@ array[...5 dedos]`. Reemplaza la columna `injured_finger` (singular) de la Ronda 2; backfill `array[injured_finger]`. |
-| `amputated_fingers` | text[] NOT NULL DEFAULT `'{}'` | **FB-1 (2026-06-06)**: dedos **amputados** (varios posibles). Se EXCLUYEN siempre de la medición (no hay dedo que medir) y se pintan **gris discontinuo**. `[]` = ninguno. CHECK `amputated_fingers <@ array[...5 dedos]`. CHECK `fingers_no_overlap`: `not (injured_fingers && amputated_fingers)` — un dedo no puede ser lesionado y amputado a la vez. El backend valida el solapamiento también a nivel API (refine de Zod cuando van los dos arrays en la misma request; read-modify-validate contra la BD cuando va sólo uno). |
+| `injured_fingers` | text[] NOT NULL DEFAULT `'{}'` | **FB-1 (2026-06-06)**: dedos **lesionados** (varios posibles): `pulgar`, `indice`, `medio`, `anular`, `menique`. Se MIDEN y se pintan **naranja**. Valores idénticos a `FingerName` en `src/lib/hand-tracking.ts`. CHECK `injured_fingers <@ array[...5 dedos]`. Reemplaza la columna `injured_finger` (singular) de la Ronda 2; backfill `array[injured_finger]`. **FB-3 (2026-06-15, D14)**: pasa a ser **obligatorio ≥1 dedo** — regla `injured_fingers >= 1` (array no vacío), reforzada en backend (Zod `createPatientSchema` / `patchPatientSchema`) y en UI. Cada dedo se mide **por separado** (MCP por dedo, sin promediar); ya no hay "driver = media de los lesionados". |
+| `amputated_fingers` | text[] NOT NULL DEFAULT `'{}'` | **FB-1 (2026-06-06)**: dedos **amputados** (varios posibles). Se EXCLUYEN siempre de la medición y se pintan **gris discontinuo**. CHECK `amputated_fingers <@ array[...5 dedos]`. CHECK `fingers_no_overlap`: `not (injured_fingers && amputated_fingers)`. ⚠️ **FB-3 (2026-06-15, D14): DEPRECADA / sin uso.** El picker se simplifica a N/L (se retira Amputado); los antiguos amputados pasan a tratarse como lesionados (se miden). La columna **permanece en la BD** (no se elimina, para no tocar esquema ni las validaciones/CHECKs existentes) pero queda **siempre vacía desde el UI**. Revierte parcialmente FB-1. |
 | `surgery_date` | date NULL | **UX-5 (2026-05-20)**: fecha de la intervención quirúrgica (p.ej. `2026-05-19`). NULL = no especificada. Petición del cirujano (test Javi 2026-05-20). |
 | `surgery_note` | text NULL | **UX-5 (2026-05-20)**: descriptor quirúrgico breve, jerga clínica (p.ej. `Tenorrafia FDP 5º dedo`). CHECK `char_length <= 120`. El backend lo recorta (trim) y rechaza cadena vacía. NUNCA nombres (D3). NULL = no especificado. **Sólo lo lee el panel del doctor**: la API por token del paciente NO lo expone. |
 | `access_token` | text UNIQUE | Token largo aleatorio para la URL del paciente |
@@ -90,12 +90,15 @@ Una fila por **cada repetición** detectada. Es la materia prima clínica.
 | `session_id` | uuid FK | |
 | `rep_index` | int | 1, 2, 3… dentro de la sesión |
 | `joint` | text | `wrist`, `MCP-index`, `PIP-index`, `DIP-index`, … |
+| `finger` | text NULL | **FB-3 (2026-06-15, D14)**: dedo al que pertenece la medición. Uno de los 5 nombres en español (`pulgar`, `indice`, `medio`, `anular`, `menique`), idénticos a `FingerName` en `src/lib/hand-tracking.ts`. **Nullable** para filas legacy anteriores a FB-3 (sin dimensión dedo). Convierte el grano en (rep × articulación × **dedo**): cada dedo afectado guarda su MCP por separado, **sin promediar** entre dedos. |
 | `max_flexion_deg` | numeric | Pico de flexión en esta rep |
 | `max_extension_deg` | numeric | Pico de extensión en esta rep |
 | `quality_flag` | text NULL | `low_visibility`, `low_confidence`, `clean`, … |
 | `recorded_at` | timestamptz | |
 
 > Mantener el detalle por articulación porque la D11 lo exige clínicamente. Si después se quiere agregar para gráficos, se hace en consulta SQL, no se pierde el dato granular.
+>
+> **FB-3 (2026-06-15, D14) — granularidad por dedo**: antes una fila por (rep × articulación) almacenaba un MCP **promediado entre los dedos afectados**, lo cual es clínicamente incorrecto (dos dedos con ROM distinto no se pueden promediar). Ahora la columna `finger` añade la tercera dimensión: una fila por (rep × articulación × dedo). La función SQL `patient_progression` (B-14) pasa a **agrupar también por `finger`** y a aceptar un **filtro de dedo opcional**, de forma **retrocompatible**: las filas con `finger NULL` (legacy) siguen agrupándose como hasta ahora. El panel del doctor dibuja **una serie de ROM por dedo afectado**.
 
 ## Vistas / cálculos derivados (no tabla)
 

@@ -91,6 +91,31 @@ Tabla `audit_log` con: doctor_id, action, target_id, payload (jsonb), created_at
 Redactar email + adjunto explicando: qué datos se capturan (ángulos, sin PII), retención (90 días tras discharge), responsable, base legal (interés legítimo / consentimiento del paciente al escanear). [[02-Decisiones-clave#D13]].
 - *Tarea de Gorka, no de Claude. Pero la trackeamos aquí.*
 
+## P0 — FB-3 (2026-06-15, D14): goniómetro por dedo
+
+> Feedback del dueño, bloqueante para el piloto. Ver [[02-Decisiones-clave#D14]] y [[tests/feedback-gorka-2026-06-15]].
+
+### B-20 [P0] Migración `rep_measurements.finger`
+- Añadir columna `finger text NULL` a `rep_measurements` (uno de `pulgar|indice|medio|anular|menique`; NULL = filas legacy).
+- CHECK opcional de dominio del valor (`finger IS NULL OR finger = ANY(array[...5 dedos])`).
+- No backfill: las filas existentes quedan con `finger NULL` (retrocompatibilidad).
+- `amputated_fingers` queda **deprecada/sin uso** (D14) — NO se borra; sólo dejar nota. El UI dejará de escribirla.
+
+### B-21 [P0] `patient_progression` agrupa por dedo
+- Reescribir la función SQL `patient_progression` (B-14) para **agrupar también por `finger`** y aceptar un **parámetro de dedo opcional** (filtro).
+- Retrocompatible: filas con `finger NULL` agrupan como hoy.
+- Devolver una serie por (articulación × dedo) para que el panel pinte una línea por dedo afectado.
+
+### B-22 [P0] `POST /api/patient/:token/sessions` con `finger` por medición
+- Aceptar `finger` en cada item de `rep_measurements` del payload (B-12).
+- Persistir el MCP **por dedo, sin promediar**.
+- Validación: `finger` ∈ los 5 dedos o NULL.
+
+### B-23 [P0] Validación `injured_fingers >= 1` (alta + edición)
+- Reforzar en los schemas Zod `createPatientSchema` y `patchPatientSchema`: `injured_fingers` array **no vacío** (mín. 1).
+- En el `patch`, si se intenta dejar el array vacío → 400.
+- Retirar del backend cualquier escritura de `amputated_fingers` desde el UI (D14: queda vacía).
+
 ## P2 — Nice to have
 
 ### B-18 [P2] Webhook a Slack/email cuando un paciente lleva 48h sin sesión

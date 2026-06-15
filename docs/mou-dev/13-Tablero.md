@@ -7,12 +7,17 @@ mou-board-version: 1
 
 ## 📥 Backlog
 
-- [ ] **B-17** [P1] Documento legal para director médico (Gorka) #backend
+- [ ] **B-17** [P1] Documento legal para director médico (Gorka) — borrador de carta en `legal/carta-direccion-hospital.md` #backend
 - [ ] **IA-08** [P1] Indicador en vivo de ángulo durante ejercicio (cubierto por F-13) #ia
 - [ ] **IA-10** [P2] Estimación de calidad de movimiento (velocidad, suavidad) #ia
 - [ ] **IA-12** [P2] Modo "espejo" autovalidación #ia
 - [ ] **OPS-1** [P0] Validación con goniómetro de los `measuredOpen/measuredClosed` (Javi) #infra
 - [ ] **OPS-2** [P1] Deploy a Vercel preview el 2026-05-14 + QA en iPhone real #infra
+- [ ] **IA-15** [P2] [Fase 2] D15: cámara mide MCP+PIP+DIP por dedo afectado (extiende FB-3, sólo afectados) #ia
+- [ ] **IA-16** [P2] [Fase 2] D15: HUD legible de MCP/PIP/DIP por dedo afectado + payload 3 articulaciones #ia
+- [ ] **F-20** [P2] [Fase 2] D15: progresión de ROM por articulación × dedo afectado en panel doctor #frontend
+- [ ] **F-21** [P2] [Fase 2] D15: informe/PDF con ROM completo (MCP/PIP/DIP) por dedo afectado #frontend
+- [ ] **OPS-4** [P2] [Fase 2] D15: validación goniómetro de calibración PIP/DIP (y definir muñeca) con Javi #infra
 
 
 ## 🔧 En curso
@@ -26,6 +31,17 @@ mou-board-version: 1
 
 ## ✅ Hecho
 
+- [x] **B-20** [P0] FB-3: migración `rep_measurements.finger` (nullable + check 5 dedos); `amputated_fingers` deprecada ✓ 2026-06-15 #backend #infra
+- [x] **B-21** [P0] FB-3: `patient_progression` agrupa por `(día, articulación, dedo)`, retrocompat `finger NULL` ✓ 2026-06-15 #backend
+- [x] **B-22** [P0] FB-3: `POST sessions` acepta `finger`; CSV export con columna `finger` ✓ 2026-06-15 #backend
+- [x] **B-23** [P0] FB-3: validación `injured_fingers >= 1` en `createPatientSchema`/`patchPatientSchema` ✓ 2026-06-15 #backend
+- [x] **B-24** FB-3 (review): migración backfill `amputated_fingers → injured_fingers` (D14: amputados se miden); 0 amputados restantes ✓ 2026-06-15 #backend #infra
+- [x] **F-17** [P0] FB-3: picker dedos N/L (retirado Amputado), contrato simplificado a `injured[]` ✓ 2026-06-15 #frontend
+- [x] **F-18** [P0] FB-3: obligatorio ≥1 dedo lesionado en NewPatientDialog + FingerStatusControl (cliente + backend) ✓ 2026-06-15 #frontend
+- [x] **F-19** [P0] FB-3: progresión angular por `(articulación × dedo)` en panel doctor + fix de extensión nunca dibujada (signo negativo) ✓ 2026-06-15 #frontend
+- [x] **IA-13** [P0] FB-3: cámara mide y muestra el MCP de cada dedo lesionado por separado (HUD + etiquetas canvas revividas) ✓ 2026-06-15 #ia
+- [x] **IA-14** [P0] FB-3: payload de sesión por `(rep × dedo × articulación)`; resumen `done` por dedo ✓ 2026-06-15 #ia
+- [x] **PRIV-1** Aviso explícito en la sesión del paciente: el vídeo no se graba ni se almacena, solo se miden los datos del ejercicio (intro + preparing) ✓ 2026-06-15 #frontend
 - [x] **FB-1** [P1] Dedos afectados múltiples: `injured_fingers[]` + `amputated_fingers[]`, picker N/L/A, driver multi-dedo, amputados excluidos ✓ 2026-06-06 #backend #frontend
 - [x] **FB-2** [P2] Contraste de títulos en done-screen del paciente (gray-900) ✓ 2026-06-06 #frontend
 - [x] **CAL-1** Primera calibración real (MCP/PIP/DIP de Gorka) + normalización de pendiente única + gate `CALIBRATION_KEY` operativo en Vercel ✓ 2026-06-06 #ia #infra
