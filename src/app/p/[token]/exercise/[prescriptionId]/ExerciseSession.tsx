@@ -17,6 +17,7 @@ import {
   type FingerJointAngles,
   type FingerName,
   type FingerStatusMap,
+  type HandChirality,
   type HandednessReading,
   type JointAngles,
   type JointName,
@@ -125,6 +126,21 @@ const DISPLAY_SMOOTHING_WINDOW = 5;
 // ~30 fps; we sample those refs into state here so the UI doesn't re-render
 // every frame.
 const DISPLAY_FLUSH_MS = 150;
+
+// Chirality verdict tuning (see `sessionChiralityRef`). Counted in frames
+// where a hand was actually detected, at ~30 fps: 12 samples ≈ 0.4 s of hand
+// in view, 45 ≈ 1.5 s.
+// - MIN_SAMPLES/MIN_AGREEMENT/MIN_SCORE: evidence required to FIX the verdict.
+//   The agreement ratio is the one that matters: on the goniometer photo set
+//   1 of 15 readings (a closed fist) came back misclassified, so a single
+//   frame can never be trusted, but a large majority can.
+// - MAX_SAMPLES: hard cap. If the evidence never gets clean (poor light, hand
+//   half out of frame), we still commit to the dominant side rather than
+//   leave the patient exercising with a session that measures nothing.
+const CHIRALITY_MIN_SAMPLES = 12;
+const CHIRALITY_MIN_AGREEMENT = 0.8;
+const CHIRALITY_MIN_SCORE = 0.7;
+const CHIRALITY_MAX_SAMPLES = 45;
 
 // All fingers normal — patient view doesn't expose finger-status overrides.
 const ALL_NORMAL: FingerStatusMap = {
@@ -325,6 +341,26 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   const handednessFiredRef = useRef(false);
   const expectedHandRef = useRef<'Left' | 'Right'>('Right');
 
+  // CHIRALITY — the session's flexion sign. `calculateAllJointAngles` derives
+  // the flexion/extension sign from a 2D cross product, which measures the
+  // sense of rotation IN IMAGE SPACE: it inverts as soon as the projected hand
+  // is mirrored (the patient turns the other side of the hand to the camera,
+  // or uses the other hand). Without correction, a patient presenting the
+  // chirality opposite to the one the calibration was captured on flexes to
+  // −90°, and `normalizeJointAngle` clamps that full fist to `clinicalMin`
+  // (−30°) — silently, with no visible error. MediaPipe's handedness label
+  // flips under exactly the same mirroring, so it is what turns the raw sign
+  // back into an anatomical one (see `flexionSignFor`).
+  //
+  // The verdict is SESSION-LEVEL, never per-frame: on the goniometer photo set
+  // 1 of 15 frames (a closed fist) was misclassified, and one bad frame would
+  // invert that frame's angles and poison the peak of the rep it belongs to.
+  // Once fixed it is never revisited either — a sign flip halfway through a
+  // session would be worse than a constant sign, even a wrong one, because it
+  // would split one exercise into two incomparable halves.
+  // `null` = still in warm-up, we do not measure yet (see `processLandmarks`).
+  const sessionChiralityRef = useRef<HandChirality | null>(null);
+
   // Keep the ref in sync with the state so the rAF callbacks see the latest
   // toggle value without rebinding the loop.
   useEffect(() => {
@@ -462,8 +498,52 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   }, [phase, stopLoop]);
 
   // ---------- per-frame loop ----------
+
+  // Feeds this frame's handedness reading into the session sampler and, as
+  // soon as the accumulated evidence is consistent enough, FIXES the session
+  // chirality. Returns nothing: callers read `sessionChiralityRef`.
+  //
+  // Stability is judged on the agreement ratio (how many samples back the
+  // dominant side) rather than on any single reading, because single readings
+  // are exactly what proved unreliable. `summarizeHandednessSamples` gives us
+  // the dominant side plus the mean confidence of the samples that agree.
+  const updateChiralityVerdict = useCallback((result: unknown) => {
+    // Already decided — the verdict is immutable for the rest of the session.
+    if (sessionChiralityRef.current !== null) return;
+
+    const reading = readHandedness(result);
+    if (!reading) return;
+    const samples = handednessSamplesRef.current;
+    samples.push(reading);
+    if (samples.length < CHIRALITY_MIN_SAMPLES) return;
+
+    const verdict = summarizeHandednessSamples(samples);
+    if (!verdict) return;
+    const agreeing = samples.filter((s) => s.side === verdict.side).length;
+    const agreement = agreeing / samples.length;
+    const stable =
+      agreement >= CHIRALITY_MIN_AGREEMENT && verdict.score >= CHIRALITY_MIN_SCORE;
+    // Not yet convincing: keep sampling, unless we already burned the cap, in
+    // which case the dominant side is the best we will ever get.
+    if (!stable && samples.length < CHIRALITY_MAX_SAMPLES) return;
+
+    sessionChiralityRef.current = verdict.side;
+  }, []);
+
   const processLandmarks = useCallback(
     (landmarks: Point[] | null) => {
+      // Chirality warm-up gate. Until the session verdict is fixed we cannot
+      // tell flexion from extension, and measuring with a possibly inverted
+      // sign is strictly worse than not measuring: a mirrored fist reads −90°
+      // and gets clamped to `clinicalMin`, which looks like a real (terrible)
+      // measurement. We bail out BEFORE touching the frame counters so warm-up
+      // frames count neither as recorded nor as missing — they simply don't
+      // exist for the rep's `low_visibility` ratio — and nothing reaches the
+      // smoothing history, so the rep counter and the HUD start from a clean
+      // state the moment the verdict lands (a few tenths of a second in).
+      const chirality = sessionChiralityRef.current;
+      if (chirality === null) return;
+
       const rec = currentRepRef.current;
       rec.framesTotal += 1;
       if (!landmarks) {
@@ -471,7 +551,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
         return;
       }
 
-      const allRaw: FingerJointAngles = calculateAllJointAngles(landmarks);
+      const allRaw: FingerJointAngles = calculateAllJointAngles(landmarks, chirality);
 
       // FB-1: the fingers contributing to the rep driver + per-finger peaks are
       // the resolved driver set (injured fingers, or the target selection minus
@@ -670,6 +750,12 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     const result = lm.detectForVideo(video, performance.now());
     const hand = result.landmarks?.[0] ?? null;
 
+    // Chirality sampling happens before anything is measured this frame, so
+    // the very frame that completes the evidence is already usable. The
+    // handedness label only travels in the raw MediaPipe result, which is why
+    // this lives here and not in `processLandmarks`.
+    updateChiralityVerdict(result);
+
     // Resize canvas to match its on-screen size for crisp rendering.
     const rect = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
@@ -719,7 +805,13 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
       // FB-3 / IA-14: feed the REAL normalized MCP per finger so `drawHand`
       // paints the per-fingertip label for the injured fingers (it was hard-
       // coded to 0, so the labels showed nothing). One full map is required.
-      const rawAngles = calculateAllJointAngles(hand);
+      // Chirality is passed for correctness even though these labels print
+      // |ángulo| (drawHand takes the absolute value), so the overlay keeps
+      // showing sane numbers during the warm-up frames where it is still null.
+      const rawAngles = calculateAllJointAngles(
+        hand,
+        sessionChiralityRef.current ?? undefined,
+      );
       const fingerAngles: FingerAngles = {
         pulgar: Math.round(normalizeJointAngle(rawAngles.pulgar.MCP, 'MCP')),
         indice: Math.round(normalizeJointAngle(rawAngles.indice.MCP, 'MCP')),
@@ -743,7 +835,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     }
 
     scheduleNextFrame();
-  }, [processLandmarks, fingerStatus]);
+  }, [processLandmarks, fingerStatus, updateChiralityVerdict]);
 
   const scheduleNextFrame = useCallback(() => {
     rafRef.current = requestAnimationFrame(renderFrame);
@@ -1040,6 +1132,10 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     repCoachingRef.current = createRepCoaching();
     handednessSamplesRef.current = [];
     handednessFiredRef.current = false;
+    // A new acquisition is a new session: the patient may present the hand
+    // differently, so the chirality verdict is re-earned from scratch (it is
+    // deliberately NOT reset between sets — see `resumeSet`).
+    sessionChiralityRef.current = null;
     displayHistoryRef.current = [];
     displayAngleRef.current = 0;
     displayPeakRef.current = 0;

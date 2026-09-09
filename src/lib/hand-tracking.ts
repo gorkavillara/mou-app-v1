@@ -722,7 +722,7 @@ export function summarizeHandednessSamples(
 }
 
 // --- Per-joint angle calculation (Fase 1, IA-02) ---
-// See docs/obsidian-vault/12-Convencion-angular.md for the geometric convention.
+// See docs/mou-dev/12-Convencion-angular.md for the geometric convention.
 
 export type JointName = 'wrist' | 'MCP' | 'PIP' | 'DIP';
 
@@ -750,6 +750,47 @@ function angleBetweenVectors(
 }
 
 /**
+ * Image chirality of the detected hand, as reported by MediaPipe's handedness
+ * classifier. This is NOT "which of the patient's hands is it" — it is the
+ * mirror-parity of the hand as it appears in the frame, which is exactly what
+ * the flexion sign needs (see `flexionSignFor`).
+ */
+export type HandChirality = 'Left' | 'Right';
+
+/**
+ * Multiplier that turns the raw 2D cross-product sign into an ANATOMICAL one
+ * (positive = flexion, negative = extension) independent of how the hand is
+ * presented to the camera.
+ *
+ * CHIRALITY BUG (2026-09-09, found while fitting the goniometer photo set).
+ * The 2D cross product `a.x·b.y − a.y·b.x` measures the rotational sense of the
+ * joint IN IMAGE SPACE. That sense flips whenever the projected hand is
+ * mirrored — i.e. when the patient shows the other side of the hand to the
+ * camera, or uses the other hand. Measured on the goniometer set: mirroring the
+ * same 15 photos flipped the sign of all 15 raw readings while the magnitudes
+ * held (e.g. index MCP at 90° goniometer: −75.2° → +72.2°).
+ *
+ * The consequence in production was silent and severe: with a
+ * `measuredOpen/measuredClosed` pair captured on one chirality, a patient
+ * presenting the other one had every flexion reading go negative, and
+ * `normalizeJointAngle` then clamped a full fist to `clinicalMin` (−30°)
+ * instead of ~90°. That is a large part of why the surgeon could not trust the
+ * numbers.
+ *
+ * The fix: MediaPipe's handedness label flips under exactly the same mirroring
+ * (verified on the same set — 14/15 photos flipped Right→Left; the miss was a
+ * closed fist, which is why the session uses a SMOOTHED, session-level
+ * handedness rather than a per-frame one). So `sign(cross2D) · parity(label)`
+ * is invariant to mirroring AND to left-vs-right hand. The parity below is
+ * anchored empirically on the goniometer set: a real right hand in a
+ * non-mirrored photo is labelled `Right` and reads NEGATIVE while flexing, so
+ * `Right` carries −1.
+ */
+export function flexionSignFor(chirality?: HandChirality): 1 | -1 {
+  return chirality === 'Right' ? -1 : 1;
+}
+
+/**
  * Computes MCP, PIP and DIP angles for a single finger.
  *
  * All three joints carry a SIGN via the same 2D cross-product convention:
@@ -758,6 +799,12 @@ function angleBetweenVectors(
  * - MCP: between wrist→MCP and MCP→PIP.
  * - PIP: between MCP→PIP and PIP→DIP.
  * - DIP: between PIP→DIP and DIP→TIP.
+ *
+ * @param chirality MediaPipe handedness for this hand. PASS IT for any reading
+ *   that will be normalized or persisted: without it the sign is whatever the
+ *   image projection happened to give, which is not a clinical quantity (see
+ *   `flexionSignFor`). Omitting it keeps the legacy, chirality-dependent sign
+ *   and is only appropriate for synthetic landmarks in tests.
  *
  * BUG-4 (surgeon feedback 2026-05-20: "NO MARCA LA EXTENSIÓN DE LAS
  * INTERFALÁNGICAS"): PIP and DIP previously returned magnitude only, so an
@@ -770,19 +817,25 @@ function angleBetweenVectors(
  * Returned values are RAW measured degrees. Apply `normalizeJointAngle` to map
  * them to the clinical 0–90° (or 0–100/0–80) range.
  */
-export function calculateJointAngles(landmarks: Point[], finger: FingerConfig): JointAngles {
+export function calculateJointAngles(
+  landmarks: Point[],
+  finger: FingerConfig,
+  chirality?: HandChirality,
+): JointAngles {
   const wrist = landmarks[0];
   const mcp = landmarks[finger.mcpIndex];
   const pip = landmarks[finger.pipIndex];
   const dip = landmarks[finger.dipIndex];
   const tip = landmarks[finger.tipIndex];
 
+  const sign = flexionSignFor(chirality);
+
   // MCP: wrist→MCP versus MCP→PIP. Preserve sign for hyperextension.
   const a1x = mcp.x - wrist.x, a1y = mcp.y - wrist.y, a1z = mcp.z - wrist.z;
   const b1x = pip.x - mcp.x,   b1y = pip.y - mcp.y,   b1z = pip.z - mcp.z;
   const mcpMag = angleBetweenVectors(a1x, a1y, a1z, b1x, b1y, b1z);
   const mcpCross2D = a1x * b1y - a1y * b1x;
-  const mcpAngle = mcpCross2D >= 0 ? mcpMag : -mcpMag;
+  const mcpAngle = (mcpCross2D >= 0 ? mcpMag : -mcpMag) * sign;
 
   // PIP: MCP→PIP versus PIP→DIP. Signed (see BUG-4 above) so extension
   // deficit / hyperextension resolves as a negative value.
@@ -790,22 +843,25 @@ export function calculateJointAngles(landmarks: Point[], finger: FingerConfig): 
   const b2x = dip.x - pip.x,   b2y = dip.y - pip.y,   b2z = dip.z - pip.z;
   const pipMag = angleBetweenVectors(a2x, a2y, a2z, b2x, b2y, b2z);
   const pipCross2D = a2x * b2y - a2y * b2x;
-  const pipAngle = pipCross2D >= 0 ? pipMag : -pipMag;
+  const pipAngle = (pipCross2D >= 0 ? pipMag : -pipMag) * sign;
 
   // DIP: PIP→DIP versus DIP→TIP. Signed (see BUG-4 above).
   const a3x = dip.x - pip.x,   a3y = dip.y - pip.y,   a3z = dip.z - pip.z;
   const b3x = tip.x - dip.x,   b3y = tip.y - dip.y,   b3z = tip.z - dip.z;
   const dipMag = angleBetweenVectors(a3x, a3y, a3z, b3x, b3y, b3z);
   const dipCross2D = a3x * b3y - a3y * b3x;
-  const dipAngle = dipCross2D >= 0 ? dipMag : -dipMag;
+  const dipAngle = (dipCross2D >= 0 ? dipMag : -dipMag) * sign;
 
   return { MCP: mcpAngle, PIP: pipAngle, DIP: dipAngle };
 }
 
-export function calculateAllJointAngles(landmarks: Point[]): FingerJointAngles {
+export function calculateAllJointAngles(
+  landmarks: Point[],
+  chirality?: HandChirality,
+): FingerJointAngles {
   const out = {} as FingerJointAngles;
   for (const finger of FINGERS) {
-    out[finger.name] = calculateJointAngles(landmarks, finger);
+    out[finger.name] = calculateJointAngles(landmarks, finger, chirality);
   }
   return out;
 }
@@ -863,18 +919,43 @@ export const JOINT_CALIBRATION: Record<JointName, JointCalibration> = {
   // without one, so the 2026-06-06 capture came back 0/0 and was discarded).
   // Placeholder until a capture or goniometer session provides real values.
   wrist: { measuredOpen: 15, measuredClosed: 95,  clinicalMax: 90, clinicalMin: -70 },
-  // MCP/PIP/DIP: 2026-06-06 technical capture by Gorka (webcam, hand in profile).
-  MCP:   { measuredOpen: 12.3, measuredClosed: 98.8, clinicalMax: 90,  clinicalMin: -30 },
-  // PIP/DIP measuredOpen is NEGATIVE: with the hand flat-open MediaPipe reads
-  // the interphalangeals a few degrees past straight (−5.7 / −5.6). That is
-  // exactly why the unified-slope normalization (below) replaced the old
-  // asymmetric negative band. clinicalMin (BUG-4, surgeon feedback 2026-05-20):
-  // post-op EXTENSOR-TENDON patients sit near or below 0° (extension deficit /
-  // mild hyperextension); the −30° bound lets normalization RESOLVE that region
-  // instead of flattening it to 0 — the "NO MARCA LA EXTENSIÓN DE LAS
-  // INTERFALÁNGICAS" complaint. Bound still pending goniometer with Javi.
-  PIP:   { measuredOpen: -5.7, measuredClosed: 81.4, clinicalMax: 100, clinicalMin: -30 },
-  DIP:   { measuredOpen: -5.6, measuredClosed: 71.9, clinicalMax: 80,  clinicalMin: -30 },
+
+  // MCP/PIP/DIP — 2026-09-09 GONIOMETER-REFERENCED fit (OPS-1).
+  //
+  // Source: the surgeon's photo set (index finger held at 0° / 45° / 90° on each
+  // of MCP, PIP and DIP, each posture measured with a physical goniometer),
+  // stored in docs/mou-dev/calibration/. Reproduce with:
+  //     npx tsx scripts/calibrate-from-photos.ts
+  // The script runs the app's own MediaPipe pipeline over each photo, reads the
+  // angle through THIS file's `calculateJointAngles`, least-squares fits
+  // `clinical = m·raw + b` and inverts the line to get the pair below.
+  //
+  // This supersedes the 2026-06-06 capture (MCP 12.3/98.8, PIP −5.7/81.4,
+  // DIP −5.6/71.9), which averaged across the long fingers, had no goniometer
+  // reference, and — decisively — was taken at the opposite image chirality, so
+  // its MCP `measuredOpen` carried the wrong sign (see `flexionSignFor`).
+  //
+  // Fit quality against the goniometer (clinical degrees):
+  //   MCP  R² 0.909 · mean 10.0° · max 14.9°   ← marginal, see caveat
+  //   PIP  R² 0.976 · mean  5.3° · max  7.9°
+  //   DIP  R² 0.994 · mean  2.7° · max  4.1°
+  //
+  // ⚠️ CAVEAT: three points per joint, one finger, one subject (a single unaffected hand), from
+  // WhatsApp-compressed crops. PIP/DIP clear the vault's clinical gate (mean
+  // ≤10°, max ≤15°); MCP only just does — its 2D reading saturates above ~45°
+  // of flexion because the proximal phalanx foreshortens and the knuckle
+  // occludes in a closed fist. More MCP capture points are still owed (OPS-1).
+  MCP:   { measuredOpen: -11.8, measuredClosed: 88,   clinicalMax: 90,  clinicalMin: -30 },
+  // measuredOpen stays NEGATIVE on all three joints: with the finger held at a
+  // true 0° the detector reads a few degrees past straight. That is why
+  // normalization below uses one single slope through both calibration points.
+  // clinicalMin (BUG-4, surgeon feedback 2026-05-20): post-op EXTENSOR-TENDON
+  // patients sit near or below 0° (extension deficit / mild hyperextension);
+  // the −30° bound lets normalization RESOLVE that region instead of flattening
+  // it to 0 — the "NO MARCA LA EXTENSIÓN DE LAS INTERFALÁNGICAS" complaint. The
+  // bound itself is still unmeasured: the photo set has no hyperextension pose.
+  PIP:   { measuredOpen: -1.3,  measuredClosed: 76.8, clinicalMax: 100, clinicalMin: -30 },
+  DIP:   { measuredOpen: -8,    measuredClosed: 52.9, clinicalMax: 80,  clinicalMin: -30 },
 };
 
 /**

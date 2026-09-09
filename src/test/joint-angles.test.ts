@@ -3,6 +3,7 @@ import {
   calculateJointAngles,
   calculateAllJointAngles,
   calculateWristAngle,
+  flexionSignFor,
   normalizeJointAngle,
   normalizeFingerJointAngles,
   JOINT_CALIBRATION,
@@ -124,11 +125,11 @@ describe('normalizeJointAngle', () => {
 
   // 2026-06-06: under the unified slope, an input BELOW measuredOpen no longer
   // flattens to 0 — it extends linearly into the negative clinical band (down
-  // to clinicalMin). MCP measuredOpen is 12.3, so 0 raw sits below the open
-  // pose and reads slightly negative. Intent preserved: sub-open inputs resolve
-  // smoothly, they are not discarded.
+  // to clinicalMin). Asserted relative to measuredOpen rather than a literal:
+  // the 2026-09-09 goniometer fit moved MCP measuredOpen from +12.3 to −11.8,
+  // and the old literal (raw 0) silently stopped being a sub-open input.
   it('maps a sub-measuredOpen MCP input below 0, not flattened to 0', () => {
-    const r = normalizeJointAngle(0, 'MCP');
+    const r = normalizeJointAngle(JOINT_CALIBRATION.MCP.measuredOpen - 5, 'MCP');
     expect(r).toBeLessThan(0);
     expect(r).toBeGreaterThanOrEqual(JOINT_CALIBRATION.MCP.clinicalMin!);
   });
@@ -244,6 +245,82 @@ describe('calculateJointAngles — interphalangeal extension sign (BUG-4)', () =
     const norm = normalizeJointAngle(extensionRaw, 'PIP');
     expect(norm).toBeLessThan(0);
     expect(norm).toBeGreaterThanOrEqual(JOINT_CALIBRATION.PIP.clinicalMin!);
+  });
+});
+
+// Chirality bug (2026-09-09). The 2D cross-product sign is a property of the
+// IMAGE, not of the patient: mirroring the projected hand — the patient showing
+// the other side of the hand, or using the other hand — flips it. Measured on
+// the goniometer photo set: mirroring the 15 photos flipped all 15 signs while
+// the magnitudes held. Unchecked, `normalizeJointAngle` then clamped a full
+// fist to clinicalMin (−30°) instead of ~90°.
+//
+// MediaPipe's handedness label flips under exactly the same mirroring, so
+// `sign(cross2D) · parity(label)` is invariant to it. These tests pin that
+// invariance so the bug cannot come back.
+describe('calculateJointAngles — chirality invariance', () => {
+  /** Mirror the hand across the vertical axis: the exact image-space flip. */
+  function mirrorX(lms: Point[]): Point[] {
+    return lms.map((p) => ({ ...p, x: -p.x }));
+  }
+
+  it('flexionSignFor inverts only for Right', () => {
+    expect(flexionSignFor('Right')).toBe(-1);
+    expect(flexionSignFor('Left')).toBe(1);
+    expect(flexionSignFor(undefined)).toBe(1);
+  });
+
+  it('a mirrored hand labelled with the mirrored handedness reads THE SAME angle', () => {
+    const bent = indexBent90AtMCP();
+    const asRight = calculateJointAngles(bent, indexFinger, 'Right').MCP;
+    // Mirroring the pixels flips MediaPipe's label too, so the pair that
+    // describes the same real posture is (mirrored landmarks, flipped label).
+    const asLeft = calculateJointAngles(mirrorX(bent), indexFinger, 'Left').MCP;
+    expect(asLeft).toBeCloseTo(asRight, 6);
+  });
+
+  it('holds for PIP and DIP too, not just MCP', () => {
+    const lms = straightHandLandmarks();
+    lms[6] = { x: 0, y: 3, z: 0 };
+    lms[7] = { x: 1, y: 3.5, z: 0 };
+    lms[8] = { x: 1.5, y: 4.4, z: 0 };
+    const right = calculateJointAngles(lms, indexFinger, 'Right');
+    const left = calculateJointAngles(mirrorX(lms), indexFinger, 'Left');
+    expect(left.PIP).toBeCloseTo(right.PIP, 6);
+    expect(left.DIP).toBeCloseTo(right.DIP, 6);
+  });
+
+  it('WITHOUT a chirality the same posture reads with OPPOSITE signs — the bug', () => {
+    const bent = indexBent90AtMCP();
+    const a = calculateJointAngles(bent, indexFinger).MCP;
+    const b = calculateJointAngles(mirrorX(bent), indexFinger).MCP;
+    expect(Math.abs(a)).toBeCloseTo(Math.abs(b), 6);
+    expect(Math.sign(a)).toBe(-Math.sign(b));
+  });
+
+  it('a mirror-flipped reading would normalize to the WRONG clinical band', () => {
+    // The clinical consequence, pinned: same posture, opposite chirality, and
+    // the normalized result collapses from real flexion to the extension floor.
+    const bent = indexBent90AtMCP();
+    const correct = normalizeJointAngle(
+      calculateJointAngles(bent, indexFinger, 'Right').MCP,
+      'MCP',
+    );
+    const mislabelled = normalizeJointAngle(
+      calculateJointAngles(bent, indexFinger, 'Left').MCP,
+      'MCP',
+    );
+    expect(correct).toBeGreaterThan(50);
+    expect(mislabelled).toBeCloseTo(JOINT_CALIBRATION.MCP.clinicalMin!, 5);
+  });
+
+  it('calculateAllJointAngles forwards the chirality to every finger', () => {
+    const lms = indexBent90AtMCP();
+    const right = calculateAllJointAngles(lms, 'Right');
+    const left = calculateAllJointAngles(mirrorX(lms), 'Left');
+    for (const f of FINGERS) {
+      expect(left[f.name].MCP).toBeCloseTo(right[f.name].MCP, 6);
+    }
   });
 });
 
