@@ -139,8 +139,14 @@ test.describe('Camera fallback @patient @camera', () => {
       await expect(anonPage.getByTestId('start-exercise')).toHaveCount(0);
       await expect(anonPage.getByTestId('camera-preparing')).toBeVisible();
       await expect(anonPage.getByText(/Preparando cámara/i)).toBeVisible();
-      // UX-3 reminder in the preparing state.
-      await expect(anonPage.getByText(/DE PERFIL/i)).toBeVisible();
+      // UX-3 reminder in the preparing state. Scoped to the preparing overlay:
+      // PRIV-2 added a second, persistent "de perfil" reminder badge, so an
+      // unscoped /DE PERFIL/i now matches two elements and trips strict mode.
+      await expect(
+        anonPage.getByTestId('camera-preparing').getByText(/DE PERFIL/i),
+      ).toBeVisible();
+      // PRIV-2 — the persistent reminder badge rides along with the session.
+      await expect(anonPage.getByTestId('profile-reminder')).toBeVisible();
 
       await anon.snap(testInfo, 'camera-preparing');
 
