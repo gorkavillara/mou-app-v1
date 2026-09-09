@@ -30,8 +30,11 @@ test.describe('Dev calibration gate', () => {
     async ({ page }) => {
       const res = await page.goto(`${PATH}?key=e2e-cal-key`);
       expect(res?.status()).toBe(200);
+      // The h1 is deliberately static ("Calibración articular"): the tool now
+      // calibrates MCP/PIP/DIP behind a selector, so asserting a title that
+      // followed the selected joint would be brittle.
       await expect(
-        page.getByRole('heading', { name: 'Calibración (IA-04)' }),
+        page.getByRole('heading', { name: 'Calibración articular (IA-04)' }),
       ).toBeVisible();
     },
   );

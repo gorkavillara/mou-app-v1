@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FINGERS,
+  JOINT_CALIBRATION,
   calculateAllJointAngles,
   calculateJointAngles,
   drawHand,
@@ -11,29 +12,38 @@ import {
   type FingerConfig,
   type FingerJointAngles,
   type FingerName,
+  type HandChirality,
   type JointAngles,
   type Point,
 } from '@/lib/hand-tracking';
 
 /**
- * Calibration tool for the MCP joint (IA-04, surgeon feedback 2026-06-15).
+ * Calibration tool for the finger joints (IA-04, surgeon feedback 2026-06-15).
  *
- * The surgeon's only trusted datum right now is the metacarpophalangeal (MCP)
- * angle of the AFFECTED finger: the angle between the metacarpal bone
- * (wrist → MCP knuckle) and the proximal phalanx (MCP knuckle → PIP). The
- * geometry in `calculateJointAngles(...).MCP` is correct; what was wrong is the
- * CALIBRATION — the prior open/fist capture averaged across long fingers and
- * never referenced a real goniometer.
+ * The datum the surgeon trusts is a GONIOMETER reading on ONE joint of ONE
+ * finger. The geometry in `calculateJointAngles(...)` is correct; what was
+ * wrong is the CALIBRATION — the prior open/fist capture averaged across long
+ * fingers and never referenced a real goniometer.
  *
  * This view rebuilds the capture model around:
- *  1. A target-finger selector (calibrate ONE finger's MCP at a time).
- *  2. An on-video overlay that draws exactly what is measured (metacarpal +
- *     proximal phalanx segments and the MCP vertex arc) so the operator can see
- *     the tool agrees with the goniometer placement.
+ *  1. A target-finger AND target-joint selector (calibrate ONE joint of ONE
+ *     finger at a time). The surgeon now hands us goniometer photos of MCP,
+ *     PIP and DIP, so restricting the tool to the MCP would leave two thirds of
+ *     the evidence unusable.
+ *  2. An on-video overlay that draws exactly what is measured for the SELECTED
+ *     joint (its two bone segments plus the vertex arc), so the operator can
+ *     see the tool measures where he places the goniometer.
  *  3. Multi-point goniometer-referenced capture: the operator measures the real
- *     clinical MCP angle with a physical goniometer, types it in, and captures
- *     the pair { rawMCP, clinical }. A least-squares line over the points yields
- *     measuredOpen / measuredClosed for the JOINT_CALIBRATION MCP entry.
+ *     clinical angle with a physical goniometer, types it in, and captures the
+ *     pair { raw, clinical }. A least-squares line over the points yields
+ *     measuredOpen / measuredClosed for that joint's JOINT_CALIBRATION entry.
+ *
+ * CHIRALITY (2026-09-09). Every angle read here passes the detected MediaPipe
+ * handedness into `calculateJointAngles`. Without it the sign of the reading
+ * depends on how the hand happens to be projected (which side faces the camera,
+ * which hand it is), so points captured across poses would not be comparable
+ * with each other and the fit would be garbage. See `flexionSignFor` in
+ * `@/lib/hand-tracking`.
  *
  * The camera / MediaPipe / rAF loop / detection infrastructure is preserved from
  * the previous version; only the capture model and overlay are new.
@@ -66,19 +76,101 @@ const HAND_LANDMARKER_MODEL_URL =
 
 const ALL_FINGER_NAMES: FingerName[] = ['pulgar', 'indice', 'medio', 'anular', 'menique'];
 
-/** Clinical bounds we export for the MCP entry (matches JOINT_CALIBRATION.MCP). */
-const MCP_CLINICAL_MAX = 90;
-const MCP_CLINICAL_MIN = -30;
+/**
+ * Joints this tool can calibrate. The wrist is deliberately excluded: it needs a
+ * forearm reference point the calibration rig does not provide (see the note on
+ * `JOINT_CALIBRATION.wrist`).
+ */
+type TargetJoint = 'MCP' | 'PIP' | 'DIP';
+
+const ALL_TARGET_JOINTS: TargetJoint[] = ['MCP', 'PIP', 'DIP'];
+
+type JointMeta = {
+  /** Full clinical name, for headings and instructions. */
+  fullLabel: string;
+  /** Proximal segment of the angle (drawn blue), in the surgeon's language. */
+  proximalLabel: string;
+  /** Distal segment of the angle (drawn orange). */
+  distalLabel: string;
+};
+
+/**
+ * How each joint is measured, described the way the surgeon places the
+ * goniometer: two bone segments meeting at the joint's vertex. The overlay draws
+ * exactly this, so the wording here and the drawing must stay in sync.
+ */
+const JOINT_META: Record<TargetJoint, JointMeta> = {
+  MCP: {
+    fullLabel: 'Metacarpofalángica (MCP)',
+    proximalLabel: 'metacarpiano (muñeca → nudillo)',
+    distalLabel: 'falange proximal (nudillo → PIP)',
+  },
+  PIP: {
+    fullLabel: 'Interfalángica proximal (PIP)',
+    proximalLabel: 'falange proximal (nudillo → PIP)',
+    distalLabel: 'falange media (PIP → DIP)',
+  },
+  DIP: {
+    fullLabel: 'Interfalángica distal (DIP)',
+    proximalLabel: 'falange media (PIP → DIP)',
+    distalLabel: 'falange distal (DIP → punta)',
+  },
+};
+
+/**
+ * Clinical bounds come from `JOINT_CALIBRATION` — the same table the export is
+ * pasted back into — instead of being duplicated here. Hardcoding them once
+ * meant the tool could only ever speak about the MCP's 0–90° range.
+ */
+function clinicalMaxOf(joint: TargetJoint): number {
+  return JOINT_CALIBRATION[joint].clinicalMax;
+}
+
+function clinicalMinOf(joint: TargetJoint): number {
+  return JOINT_CALIBRATION[joint].clinicalMin ?? 0;
+}
+
+/**
+ * The landmark triplet whose VERTEX is the joint being calibrated:
+ *   MCP → muñeca · nudillo · PIP
+ *   PIP → nudillo · PIP · DIP
+ *   DIP → PIP · DIP · punta
+ * Written as ifs (not a switch) so TypeScript sees a total function without an
+ * unreachable default branch.
+ */
+function jointLandmarkIndices(
+  finger: FingerConfig,
+  joint: TargetJoint,
+): { start: number; vertex: number; end: number } {
+  if (joint === 'MCP') {
+    return { start: 0, vertex: finger.mcpIndex, end: finger.pipIndex };
+  }
+  if (joint === 'PIP') {
+    return { start: finger.mcpIndex, vertex: finger.pipIndex, end: finger.dipIndex };
+  }
+  return { start: finger.pipIndex, vertex: finger.dipIndex, end: finger.tipIndex };
+}
+
+/**
+ * Narrows MediaPipe's raw handedness string to the lib's `HandChirality`.
+ * Anything else (missing field, unexpected label) yields `undefined`, which
+ * makes `calculateJointAngles` fall back to its legacy sign — visibly flagged in
+ * the UI so the operator does not capture points he cannot compare.
+ */
+function toChirality(categoryName?: string): HandChirality | undefined {
+  return categoryName === 'Left' || categoryName === 'Right' ? categoryName : undefined;
+}
 
 /** Colors for the "what is measured" overlay. */
-const METACARPAL_COLOR = '#007AFF'; // blue — wrist → MCP
-const PHALANX_COLOR = '#FB923C'; // orange — MCP → PIP
+const PROXIMAL_COLOR = '#007AFF'; // blue — proximal segment of the joint
+const DISTAL_COLOR = '#FB923C'; // orange — distal segment of the joint
 const ARC_COLOR = '#FACC15'; // yellow — vertex arc
 
 /**
- * A single goniometer-referenced sample: the raw MCP reading (degrees) of the
- * selected finger at the instant of capture, paired with the clinical angle the
- * operator measured with a physical goniometer for that exact pose.
+ * A single goniometer-referenced sample: the raw reading (degrees) of the
+ * selected joint of the selected finger at the instant of capture, paired with
+ * the clinical angle the operator measured with a physical goniometer for that
+ * exact pose.
  */
 type CapturePoint = {
   id: string;
@@ -89,22 +181,31 @@ type CapturePoint = {
   source: 'live' | 'photo';
   /** Original file name when `source === 'photo'`. */
   fileName?: string;
+  /**
+   * Chirality the raw reading was signed with. Recorded for traceability: a
+   * point read without chirality is not comparable with the rest.
+   */
+  chirality?: HandChirality;
 };
 
 /**
  * A photo uploaded by the surgeon and processed by the IMAGE-mode landmarker.
- * Holds the detection outcome for the finger that was active when it was
- * processed, plus the clinical angle being entered for it.
+ * Holds the detection outcome for the finger AND joint that were active when it
+ * was processed, plus the clinical angle being entered for it.
  */
 type ProcessedPhoto = {
   id: string;
   fileName: string;
   /** Object URL of the uploaded image, used for rendering. Revoked on removal. */
   objectUrl: string;
-  /** The finger the raw MCP was computed for (so we can detect stale photos). */
+  /** The finger the raw angle was computed for (so we can detect stale photos). */
   finger: FingerName;
-  /** Raw MCP of the selected finger, or null when no hand was detected. */
-  rawMcp: number | null;
+  /** The joint the raw angle was computed for (same staleness reason). */
+  joint: TargetJoint;
+  /** Raw angle of the selected joint, or null when no hand was detected. */
+  raw: number | null;
+  /** Chirality MediaPipe reported for this photo, used to sign the reading. */
+  chirality?: HandChirality;
   /** Detected landmarks (normalised 0..1), kept for the overlay. */
   landmarks: Point[] | null;
   /** Natural pixel size of the source image, for the cover remap. */
@@ -124,7 +225,7 @@ type LinearFit =
       intercept: number;
       /** raw where clinical = 0 → measuredOpen. */
       measuredOpen: number;
-      /** raw where clinical = 90 → measuredClosed. */
+      /** raw where clinical = clinicalMax of the joint → measuredClosed. */
       measuredClosed: number;
       /** Coefficient of determination, 0..1 (1 for the exact 2-point line). */
       r2: number;
@@ -171,15 +272,20 @@ function toCanvasPx(
 }
 
 /**
- * Draws the "what is measured" overlay for the selected finger: the metacarpal
- * segment (wrist → MCP), the proximal phalanx (MCP → PIP), and an arc at the MCP
- * vertex labelled with the raw MCP angle.
+ * Draws the "what is measured" overlay for the SELECTED joint of the selected
+ * finger: its proximal segment (blue), its distal segment (orange) and an arc at
+ * the joint vertex labelled with the raw angle.
+ *
+ * Drawing the MCP triplet regardless of the joint under calibration (the old
+ * behaviour) was actively misleading: the surgeon compares the overlay against
+ * where he puts the goniometer, so it must follow the selector.
  */
-function drawMcpOverlay(
+function drawJointOverlay(
   ctx: CanvasRenderingContext2D,
   landmarks: Point[],
   finger: FingerConfig,
-  rawMcp: number,
+  joint: TargetJoint,
+  rawAngle: number,
   canvasW: number,
   canvasH: number,
   videoW: number,
@@ -191,32 +297,33 @@ function drawMcpOverlay(
   flipText = true,
 ) {
   const px = (lm: Point) => toCanvasPx(lm, videoW, videoH, canvasW, canvasH);
-  const wrist = px(landmarks[0]);
-  const mcp = px(landmarks[finger.mcpIndex]);
-  const pip = px(landmarks[finger.pipIndex]);
+  const indices = jointLandmarkIndices(finger, joint);
+  const start = px(landmarks[indices.start]);
+  const vertex = px(landmarks[indices.vertex]);
+  const end = px(landmarks[indices.end]);
 
-  // Metacarpal: wrist → MCP (blue).
-  ctx.strokeStyle = METACARPAL_COLOR;
+  // Proximal segment: start → vertex (blue).
+  ctx.strokeStyle = PROXIMAL_COLOR;
   ctx.lineWidth = 4;
   ctx.setLineDash([]);
   ctx.lineCap = 'round';
   ctx.beginPath();
-  ctx.moveTo(wrist.x, wrist.y);
-  ctx.lineTo(mcp.x, mcp.y);
+  ctx.moveTo(start.x, start.y);
+  ctx.lineTo(vertex.x, vertex.y);
   ctx.stroke();
 
-  // Proximal phalanx: MCP → PIP (orange).
-  ctx.strokeStyle = PHALANX_COLOR;
+  // Distal segment: vertex → end (orange).
+  ctx.strokeStyle = DISTAL_COLOR;
   ctx.beginPath();
-  ctx.moveTo(mcp.x, mcp.y);
-  ctx.lineTo(pip.x, pip.y);
+  ctx.moveTo(vertex.x, vertex.y);
+  ctx.lineTo(end.x, end.y);
   ctx.stroke();
 
   // Endpoint dots.
   for (const [p, color] of [
-    [wrist, METACARPAL_COLOR],
-    [mcp, '#ffffff'],
-    [pip, PHALANX_COLOR],
+    [start, PROXIMAL_COLOR],
+    [vertex, '#ffffff'],
+    [end, DISTAL_COLOR],
   ] as const) {
     ctx.beginPath();
     ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
@@ -227,26 +334,33 @@ function drawMcpOverlay(
     ctx.stroke();
   }
 
-  // Arc at the vertex (MCP). The arc spans from the metacarpal direction to the
-  // phalanx direction, drawn in screen space so it visually traces the angle.
-  const angA = Math.atan2(wrist.y - mcp.y, wrist.x - mcp.x);
-  const angB = Math.atan2(pip.y - mcp.y, pip.x - mcp.x);
+  // Arc at the joint vertex. The arc spans from the proximal direction to the
+  // distal direction, drawn in screen space so it visually traces the angle.
+  const angA = Math.atan2(start.y - vertex.y, start.x - vertex.x);
+  const angB = Math.atan2(end.y - vertex.y, end.x - vertex.x);
   // Draw only the minor arc (the actual joint angle), not the full ring.
   let delta = angB - angA;
   while (delta <= -Math.PI) delta += 2 * Math.PI;
   while (delta > Math.PI) delta -= 2 * Math.PI;
-  const radius = 26;
+  // The interphalangeal joints sit closer together than the MCP, so a fixed
+  // radius would swallow the whole finger: cap it to a fraction of the shorter
+  // segment.
+  const segLen = Math.min(
+    Math.hypot(start.x - vertex.x, start.y - vertex.y),
+    Math.hypot(end.x - vertex.x, end.y - vertex.y),
+  );
+  const radius = Math.max(10, Math.min(26, segLen * 0.6));
   ctx.strokeStyle = ARC_COLOR;
   ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.arc(mcp.x, mcp.y, radius, angA, angA + delta, delta < 0);
+  ctx.arc(vertex.x, vertex.y, radius, angA, angA + delta, delta < 0);
   ctx.stroke();
 
   // Angle label near the vertex. Counter-flip text because the canvas has
   // CSS scaleX(-1) (mirrors `drawHand`'s text handling).
-  const label = `${Math.round(rawMcp)}° raw`;
+  const label = `${joint} ${Math.round(rawAngle)}° raw`;
   ctx.save();
-  ctx.translate(mcp.x, mcp.y - 34);
+  ctx.translate(vertex.x, vertex.y - 34);
   if (flipText) ctx.scale(-1, 1);
   ctx.font = 'bold 13px ui-monospace, monospace';
   ctx.textAlign = 'center';
@@ -267,7 +381,7 @@ function drawMcpOverlay(
  * marker (`ok:false`) when there are <2 points or the slope is non-positive
  * (which would invert the calibration and break normalization downstream).
  */
-function fitLinear(points: CapturePoint[]): LinearFit {
+function fitLinear(points: CapturePoint[], clinicalMax: number): LinearFit {
   if (points.length < 2) {
     return { ok: false, reason: 'Captura al menos 2 puntos para calcular el ajuste.' };
   }
@@ -315,7 +429,8 @@ function fitLinear(points: CapturePoint[]): LinearFit {
   const r2 = ssTot === 0 ? 1 : Math.max(0, 1 - ssRes / ssTot);
 
   const measuredOpen = -intercept / slope; // raw at clinical = 0
-  const measuredClosed = (MCP_CLINICAL_MAX - intercept) / slope; // raw at clinical = 90
+  // raw at clinical = clinicalMax (90 MCP / 100 PIP / 80 DIP).
+  const measuredClosed = (clinicalMax - intercept) / slope;
 
   return {
     ok: true,
@@ -328,13 +443,14 @@ function fitLinear(points: CapturePoint[]): LinearFit {
   };
 }
 
-function buildMcpJson(fit: LinearFit): string {
+/** Line ready to paste into `JOINT_CALIBRATION` for the calibrated joint. */
+function buildJointJson(joint: TargetJoint, fit: LinearFit): string {
   if (!fit.ok) {
     return `// ${fit.reason}`;
   }
-  return `MCP: { measuredOpen: ${round1(fit.measuredOpen)}, measuredClosed: ${round1(
+  return `${joint}: { measuredOpen: ${round1(fit.measuredOpen)}, measuredClosed: ${round1(
     fit.measuredClosed,
-  )}, clinicalMax: ${MCP_CLINICAL_MAX}, clinicalMin: ${MCP_CLINICAL_MIN} },`;
+  )}, clinicalMax: ${clinicalMaxOf(joint)}, clinicalMin: ${clinicalMinOf(joint)} },`;
 }
 
 /** Loads a File into a decoded HTMLImageElement (rejects on decode error). */
@@ -375,7 +491,14 @@ export function CalibrationView() {
   // Live read-outs are kept in refs (mutated each frame) and surfaced to React
   // via a single `tick` counter so we don't re-render at 30Hz on every value.
   const liveFingerJointsRef = useRef<Record<FingerName, JointAngles> | null>(null);
-  const liveHandednessRef = useRef<{ label?: string; score?: number }>({});
+  // `label` is the narrowed chirality actually fed to `calculateJointAngles`;
+  // `rawLabel` keeps whatever MediaPipe said so the panel can show an
+  // unexpected value instead of silently blanking it.
+  const liveHandednessRef = useRef<{
+    label?: HandChirality;
+    rawLabel?: string;
+    score?: number;
+  }>({});
   const liveVisibilityRef = useRef<number | null>(null);
   const liveDetectedRef = useRef<boolean>(false);
 
@@ -386,10 +509,15 @@ export function CalibrationView() {
   const showLandmarksRef = useRef(true);
   showLandmarksRef.current = showLandmarks;
 
-  // Target finger to calibrate (the MCP of THIS finger is the protagonist).
+  // Target finger + joint to calibrate (THIS joint of THIS finger is the
+  // protagonist: overlay, read-outs, capture points and export all follow it).
   const [targetFinger, setTargetFinger] = useState<FingerName>('indice');
   const targetFingerRef = useRef<FingerName>('indice');
   targetFingerRef.current = targetFinger;
+
+  const [targetJoint, setTargetJoint] = useState<TargetJoint>('MCP');
+  const targetJointRef = useRef<TargetJoint>('MCP');
+  targetJointRef.current = targetJoint;
 
   // Goniometer-referenced capture points + the clinical value being entered.
   const [points, setPoints] = useState<CapturePoint[]>([]);
@@ -473,13 +601,18 @@ export function CalibrationView() {
     if (hand) {
       liveDetectedRef.current = true;
       const handedness = pickHandedness(result, 0);
+      const chirality = toChirality(handedness?.categoryName);
       liveHandednessRef.current = {
-        label: handedness?.categoryName,
+        label: chirality,
+        rawLabel: handedness?.categoryName,
         score: handedness?.score,
       };
       liveVisibilityRef.current = avgVisibility(hand);
 
-      const all: FingerJointAngles = calculateAllJointAngles(hand);
+      // Chirality MUST travel with the landmarks: the flexion sign is measured
+      // in image space and flips when the projected hand is mirrored, so a
+      // reading taken without it is not a clinical quantity (see `flexionSignFor`).
+      const all: FingerJointAngles = calculateAllJointAngles(hand, chirality);
       liveFingerJointsRef.current = all;
 
       const videoW = video.videoWidth || rect.width;
@@ -501,11 +634,23 @@ export function CalibrationView() {
         );
       }
 
-      // "What is measured" overlay for the selected finger, always on top.
+      // "What is measured" overlay for the selected finger + joint, always on
+      // top. Reuses the angles already computed above (same chirality).
       const finger = FINGERS.find((f) => f.name === targetFingerRef.current);
       if (finger) {
-        const rawMcp = calculateJointAngles(hand, finger).MCP;
-        drawMcpOverlay(ctx, hand, finger, rawMcp, rect.width, rect.height, videoW, videoH);
+        const joint = targetJointRef.current;
+        const rawAngle = all[finger.name][joint];
+        drawJointOverlay(
+          ctx,
+          hand,
+          finger,
+          joint,
+          rawAngle,
+          rect.width,
+          rect.height,
+          videoW,
+          videoH,
+        );
       }
     } else {
       liveDetectedRef.current = false;
@@ -587,7 +732,7 @@ export function CalibrationView() {
       return;
     }
     setError(null);
-    const raw = liveFingerJointsRef.current[targetFingerRef.current]?.MCP;
+    const raw = liveFingerJointsRef.current[targetFingerRef.current]?.[targetJointRef.current];
     if (typeof raw !== 'number' || Number.isNaN(raw)) return;
     const point: CapturePoint = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -595,6 +740,7 @@ export function CalibrationView() {
       clinical,
       capturedAt: new Date().toISOString(),
       source: 'live',
+      chirality: liveHandednessRef.current.label,
     };
     setPoints((prev) => [...prev, point].sort((a, b) => a.clinical - b.clinical));
     setClinicalInput('');
@@ -604,12 +750,12 @@ export function CalibrationView() {
     setPoints((prev) => prev.filter((p) => p.id !== id));
   }, []);
 
-  // When the target finger changes, the previously captured points belong to a
-  // different finger and would corrupt the fit — clear them. Processed photos
-  // are likewise tied to the finger active at processing time, so we drop them
-  // (and revoke their object URLs) rather than show stale raw MCP values.
-  const switchFinger = useCallback((name: FingerName) => {
-    setTargetFinger(name);
+  // Every captured point belongs to one (finger, joint) pair: mixing points
+  // from two fingers — or from two joints, whose clinical ranges and geometry
+  // differ — would corrupt the fit. So any change of target wipes the captures.
+  // Processed photos are tied to the target active at processing time too, so
+  // we drop them (and revoke their object URLs) rather than show stale raws.
+  const resetCaptures = useCallback(() => {
     setPoints([]);
     setClinicalInput('');
     setError(null);
@@ -618,6 +764,24 @@ export function CalibrationView() {
       return [];
     });
   }, []);
+
+  const switchFinger = useCallback(
+    (name: FingerName) => {
+      if (name === targetFingerRef.current) return;
+      setTargetFinger(name);
+      resetCaptures();
+    },
+    [resetCaptures],
+  );
+
+  const switchJoint = useCallback(
+    (joint: TargetJoint) => {
+      if (joint === targetJointRef.current) return;
+      setTargetJoint(joint);
+      resetCaptures();
+    },
+    [resetCaptures],
+  );
 
   // ----- photo-based calibration -----
 
@@ -644,6 +808,7 @@ export function CalibrationView() {
       setError(null);
       setProcessingPhotos(true);
       const finger = targetFingerRef.current;
+      const joint = targetJointRef.current;
       const cfg = FINGERS.find((f) => f.name === finger);
       try {
         if (!imageLandmarkerRef.current) {
@@ -657,7 +822,8 @@ export function CalibrationView() {
             fileName: file.name,
             objectUrl,
             finger,
-            rawMcp: null,
+            joint,
+            raw: null,
             landmarks: null,
             imageW: 0,
             imageH: 0,
@@ -671,10 +837,15 @@ export function CalibrationView() {
             if (!hand || !cfg) {
               base.error = 'No se ha detectado ninguna mano en la foto.';
             } else {
+              // Same rule as the live loop: sign the reading with the chirality
+              // MediaPipe reports for THIS photo. A photo of the other side of
+              // the hand would otherwise contribute an inverted raw value.
+              const chirality = toChirality(pickHandedness(result, 0)?.categoryName);
               base.landmarks = hand;
+              base.chirality = chirality;
               base.imageW = img.naturalWidth;
               base.imageH = img.naturalHeight;
-              base.rawMcp = calculateJointAngles(hand, cfg).MCP;
+              base.raw = calculateJointAngles(hand, cfg, chirality)[joint];
             }
           } catch {
             base.error = 'No se ha podido procesar la imagen.';
@@ -695,10 +866,13 @@ export function CalibrationView() {
   const addPhotoPoint = useCallback(
     (id: string) => {
       const photo = photosRef.current.find((p) => p.id === id);
-      if (!photo || photo.rawMcp === null) return;
-      // Guard against a stale photo whose finger no longer matches the target.
-      if (photo.finger !== targetFingerRef.current) {
-        setError('Esta foto se procesó para otro dedo. Vuelve a subirla con el dedo actual.');
+      if (!photo || photo.raw === null) return;
+      // Guard against a stale photo whose finger/joint no longer matches the
+      // target (belt and braces: switching target already clears the photos).
+      if (photo.finger !== targetFingerRef.current || photo.joint !== targetJointRef.current) {
+        setError(
+          'Esta foto se procesó para otro dedo o articulación. Vuelve a subirla con la selección actual.',
+        );
         return;
       }
       const clinical = Number.parseFloat(photo.clinicalInput.replace(',', '.'));
@@ -709,11 +883,12 @@ export function CalibrationView() {
       setError(null);
       const point: CapturePoint = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        raw: photo.rawMcp,
+        raw: photo.raw,
         clinical,
         capturedAt: new Date().toISOString(),
         source: 'photo',
         fileName: photo.fileName,
+        chirality: photo.chirality,
       };
       setPoints((prev) => [...prev, point].sort((a, b) => a.clinical - b.clinical));
       setPhotos((prev) => prev.map((p) => (p.id === id ? { ...p, clinicalInput: '' } : p)));
@@ -721,8 +896,12 @@ export function CalibrationView() {
     [],
   );
 
-  const fit = useMemo(() => fitLinear(points), [points]);
-  const json = buildMcpJson(fit);
+  const jointMeta = JOINT_META[targetJoint];
+  const clinicalMax = clinicalMaxOf(targetJoint);
+  const clinicalMin = clinicalMinOf(targetJoint);
+
+  const fit = useMemo(() => fitLinear(points, clinicalMax), [points, clinicalMax]);
+  const json = buildJointJson(targetJoint, fit);
   void tick; // referenced to keep the panel reactive at ~10Hz
 
   // ----- read-outs (computed each render from refs, ~10Hz) -----
@@ -732,11 +911,14 @@ export function CalibrationView() {
   const detected = liveDetectedRef.current;
   const lowConfidence = (handedness.score ?? 1) < 0.7;
   const lowVisibility = visibility !== null && visibility < 0.4;
+  // No usable chirality → the sign of the reading is arbitrary; warn loudly
+  // instead of letting the operator capture points he cannot compare.
+  const unknownChirality = detected && handedness.label === undefined;
 
   const targetConfig = FINGERS.find((f) => f.name === targetFinger)!;
-  const targetRawMcp = live?.[targetFinger]?.MCP;
-  const targetNormMcp =
-    typeof targetRawMcp === 'number' ? normalizeJointAngle(targetRawMcp, 'MCP') : null;
+  const targetRaw = live?.[targetFinger]?.[targetJoint];
+  const targetNorm =
+    typeof targetRaw === 'number' ? normalizeJointAngle(targetRaw, targetJoint) : null;
 
   return (
     <main className="min-h-screen bg-gray-50 text-gray-900">
@@ -747,12 +929,17 @@ export function CalibrationView() {
             <p className="text-[11px] font-medium uppercase tracking-wider text-gray-500">
               Dev tool
             </p>
-            <h1 className="mt-1 text-[18px] font-semibold">Calibración MCP (IA-04)</h1>
+            {/*
+              Heading kept STATIC on purpose: it no longer names a joint (the
+              tool calibrates MCP/PIP/DIP) and the e2e gate spec asserts it, so a
+              title that changed with the selector would be brittle.
+            */}
+            <h1 className="mt-1 text-[18px] font-semibold">Calibración articular (IA-04)</h1>
             <p className="mt-2 text-[13px] leading-relaxed text-gray-600">
-              Calibra el ángulo <strong>metacarpofalángico (MCP)</strong> del dedo
-              seleccionado contra un <strong>goniómetro real</strong>. Se mide el
-              ángulo entre el metacarpiano (muñeca → nudillo) y la falange proximal
-              (nudillo → primera articulación).
+              Calibra la articulación <strong>{jointMeta.fullLabel}</strong> del{' '}
+              <strong>{targetConfig.label.toLowerCase()}</strong> contra un{' '}
+              <strong>goniómetro real</strong>. Se mide el ángulo entre el{' '}
+              {jointMeta.proximalLabel} y la {jointMeta.distalLabel}.
             </p>
             <p className="mt-2 rounded-lg bg-blue-50 p-2 text-[12px] leading-relaxed text-blue-800">
               Coloca la mano <strong>de perfil</strong> a la cámara: el ángulo se
@@ -788,7 +975,7 @@ export function CalibrationView() {
             </label>
           </header>
 
-          {/* Target finger selector */}
+          {/* Target finger + joint selectors */}
           <section className="mt-3 rounded-2xl border border-gray-200 bg-white p-4">
             <h2 className="text-[14px] font-semibold">Dedo a calibrar</h2>
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -800,6 +987,7 @@ export function CalibrationView() {
                     key={name}
                     type="button"
                     onClick={() => switchFinger(name)}
+                    aria-pressed={active}
                     className={
                       'h-9 flex-1 rounded-xl px-2 text-[13px] font-semibold ' +
                       (active
@@ -813,28 +1001,53 @@ export function CalibrationView() {
               })}
             </div>
 
-            {/* Big live MCP of the selected finger */}
+            <h2 className="mt-4 text-[14px] font-semibold">Articulación a calibrar</h2>
+            <div className="mt-2 flex gap-1.5">
+              {ALL_TARGET_JOINTS.map((joint) => {
+                const active = joint === targetJoint;
+                return (
+                  <button
+                    key={joint}
+                    type="button"
+                    onClick={() => switchJoint(joint)}
+                    aria-pressed={active}
+                    title={JOINT_META[joint].fullLabel}
+                    className={
+                      'h-9 flex-1 rounded-xl px-2 text-[13px] font-semibold ' +
+                      (active
+                        ? 'bg-[#007AFF] text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200')
+                    }
+                  >
+                    {joint}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Big live read-out of the selected joint */}
             <div className="mt-3 grid grid-cols-2 gap-2">
               <div className="rounded-xl bg-gray-50 p-3 text-center">
                 <p className="text-[11px] uppercase tracking-wide text-gray-500">
-                  MCP crudo
+                  {targetJoint} crudo
                 </p>
                 <p className="mt-1 font-mono text-[26px] font-semibold tabular-nums text-gray-900">
-                  {typeof targetRawMcp === 'number' ? `${targetRawMcp.toFixed(1)}°` : '—'}
+                  {typeof targetRaw === 'number' ? `${targetRaw.toFixed(1)}°` : '—'}
                 </p>
               </div>
               <div className="rounded-xl bg-blue-50 p-3 text-center">
                 <p className="text-[11px] uppercase tracking-wide text-blue-500">
-                  MCP normalizado
+                  {targetJoint} normalizado
                 </p>
                 <p className="mt-1 font-mono text-[26px] font-semibold tabular-nums text-blue-700">
-                  {typeof targetNormMcp === 'number' ? `${targetNormMcp.toFixed(1)}°` : '—'}
+                  {typeof targetNorm === 'number' ? `${targetNorm.toFixed(1)}°` : '—'}
                 </p>
               </div>
             </div>
-            <p className="mt-2 text-[11px] text-gray-500">
-              {targetConfig.label}: metacarpiano azul, falange proximal naranja
-              sobre el vídeo.
+            <p className="mt-2 text-[11px] leading-relaxed text-gray-500">
+              {targetConfig.label} · {targetJoint}: {jointMeta.proximalLabel} en
+              azul, {jointMeta.distalLabel} en naranja sobre el vídeo. Rango
+              clínico {clinicalMin}° a {clinicalMax}°.
             </p>
           </section>
 
@@ -849,9 +1062,9 @@ export function CalibrationView() {
                 </span>
               </li>
               <li className="flex justify-between">
-                <span>Handedness</span>
+                <span>Quiralidad (handedness)</span>
                 <span>
-                  {handedness.label ?? '—'}
+                  {handedness.rawLabel ?? '—'}
                   {typeof handedness.score === 'number'
                     ? ` (${handedness.score.toFixed(2)})`
                     : ''}
@@ -867,34 +1080,51 @@ export function CalibrationView() {
             {(lowConfidence || lowVisibility) && detected ? (
               <p className="mt-2 rounded-lg bg-amber-50 p-2 text-[12px] text-amber-800">
                 {lowVisibility ? 'Baja visibilidad. ' : ''}
-                {lowConfidence ? 'Baja confianza handedness. ' : ''}
+                {lowConfidence ? 'Baja confianza de quiralidad. ' : ''}
                 Las medidas pueden no ser fiables.
+              </p>
+            ) : null}
+            {unknownChirality ? (
+              <p className="mt-2 rounded-lg bg-red-50 p-2 text-[12px] leading-relaxed text-red-700">
+                Sin quiralidad utilizable: el signo del ángulo depende de cómo se
+                proyecta la mano, así que los puntos capturados ahora no serían
+                comparables. Recoloca la mano antes de capturar.
               </p>
             ) : null}
           </section>
 
-          {/* All fingers MCP reference (small) */}
+          {/* All fingers / all joints reference (small) */}
           <section className="mt-3 rounded-2xl border border-gray-200 bg-white p-4 text-[13px]">
-            <h2 className="text-[14px] font-semibold">MCP de todos los dedos</h2>
+            <h2 className="text-[14px] font-semibold">Ángulos de todos los dedos</h2>
             <p className="mt-1 text-[11px] text-gray-500">
-              Referencia. El protagonista es el dedo seleccionado. PIP/DIP en vivo
-              como info (fuera de alcance del export).
+              Referencia en crudo. El protagonista es la columna{' '}
+              <strong>{targetJoint}</strong> del dedo seleccionado; el resto es
+              sólo información (fuera del alcance del export).
             </p>
             <div className="mt-2 grid grid-cols-[1fr_auto_auto_auto] gap-x-3 gap-y-1 font-mono text-[12px]">
               <span className="font-semibold">Dedo</span>
-              <span className="text-right font-semibold">MCP</span>
-              <span className="text-right font-semibold">PIP</span>
-              <span className="text-right font-semibold">DIP</span>
+              {ALL_TARGET_JOINTS.map((joint) => (
+                <span
+                  key={joint}
+                  className={
+                    'text-right font-semibold ' +
+                    (joint === targetJoint ? 'text-[#007AFF]' : '')
+                  }
+                >
+                  {joint}
+                </span>
+              ))}
               {ALL_FINGER_NAMES.map((name) => {
                 const cfg = FINGERS.find((f) => f.name === name)!;
                 const angles = live?.[name];
                 const isTarget = name === targetFinger;
                 return (
-                  <FingerMcpRow
+                  <FingerJointsRow
                     key={name}
                     label={cfg.label}
                     angles={angles}
-                    highlight={isTarget}
+                    highlightFinger={isTarget}
+                    highlightJoint={targetJoint}
                   />
                 );
               })}
@@ -905,11 +1135,11 @@ export function CalibrationView() {
           <section className="mt-3 rounded-2xl border border-gray-200 bg-white p-4 text-[13px]">
             <h2 className="text-[14px] font-semibold">Captura goniómetro-referenciada</h2>
             <p className="mt-1 text-[12px] leading-relaxed text-gray-600">
-              Coloca el dedo en una posición cuyo MCP hayas medido con goniómetro,
-              escribe ese ángulo clínico (grados, admite negativos p.ej.
-              hiperextensión) y pulsa <strong>Capturar punto</strong>. Captura al
-              menos 2 posiciones bien separadas (extensión ≈0° y flexión ≈90°),
-              idealmente 3+.
+              Coloca el dedo en una posición cuya {targetJoint} hayas medido con
+              goniómetro, escribe ese ángulo clínico (grados, admite negativos
+              p.ej. hiperextensión) y pulsa <strong>Capturar punto</strong>.
+              Captura al menos 2 posiciones bien separadas (extensión ≈0° y
+              flexión ≈{clinicalMax}°), idealmente 3+.
             </p>
             <div className="mt-3 flex items-end gap-2">
               <label className="flex-1">
@@ -920,7 +1150,7 @@ export function CalibrationView() {
                   step="0.1"
                   value={clinicalInput}
                   onChange={(e) => setClinicalInput(e.target.value)}
-                  placeholder="p.ej. 0, 45, 90"
+                  placeholder={`p.ej. 0, ${Math.round(clinicalMax / 2)}, ${clinicalMax}`}
                   className="mt-1 h-10 w-full rounded-xl border border-gray-200 px-3 text-[14px] tabular-nums outline-none focus:border-[#007AFF]"
                 />
               </label>
@@ -983,7 +1213,7 @@ export function CalibrationView() {
 
             <p className="mt-3 text-[12px] text-gray-600">
               Bloque para pegar en <code className="text-[11px]">JOINT_CALIBRATION</code>{' '}
-              (solo MCP):
+              (sólo la entrada <strong>{targetJoint}</strong>):
             </p>
             <pre className="mt-1 overflow-auto rounded-lg bg-gray-900 p-3 text-[11px] leading-snug text-emerald-200">
               {json}
@@ -997,14 +1227,17 @@ export function CalibrationView() {
               Sube fotos de la mano <strong>de perfil</strong>, con el{' '}
               <strong>{targetConfig.label.toLowerCase()}</strong> completo y visible
               (igual que la medición en vivo: si no es de perfil, el ángulo no es
-              comparable). Por cada foto verás el overlay del MCP medido; escribe el
-              ángulo clínico que anotó el cirujano y añádelo a los mismos puntos del
-              ajuste.
+              comparable). Por cada foto verás el overlay de la {targetJoint}{' '}
+              medida; escribe el ángulo clínico que anotó el cirujano y añádelo a
+              los mismos puntos del ajuste.
             </p>
             <p className="mt-2 rounded-lg bg-blue-50 p-2 text-[12px] leading-relaxed text-blue-800">
-              Las fotos se procesan para el dedo seleccionado ahora mismo
-              (<strong>{targetConfig.label}</strong>). Si cambias de dedo, las fotos
-              y los puntos se reinician.
+              Las fotos se procesan para la selección actual (
+              <strong>
+                {targetConfig.label} · {targetJoint}
+              </strong>
+              ). Si cambias de dedo o de articulación, las fotos y los puntos se
+              reinician.
             </p>
 
             <div className="mt-3 flex items-center gap-2">
@@ -1031,6 +1264,7 @@ export function CalibrationView() {
                     key={photo.id}
                     photo={photo}
                     finger={targetConfig}
+                    clinicalMax={clinicalMax}
                     onClinicalChange={(v) => setPhotoClinical(photo.id, v)}
                     onAddPoint={() => addPhotoPoint(photo.id)}
                     onRemove={() => removePhoto(photo.id)}
@@ -1067,24 +1301,46 @@ export function CalibrationView() {
   );
 }
 
-function FingerMcpRow({
-  label,
-  angles,
-  highlight,
-}: {
+type FingerJointsRowProps = {
   label: string;
   angles: JointAngles | undefined;
-  highlight: boolean;
-}) {
+  /** True for the finger under calibration. */
+  highlightFinger: boolean;
+  /** Joint under calibration: only that cell of the target finger is emphasised. */
+  highlightJoint: TargetJoint;
+};
+
+/**
+ * One row of the reference table. The emphasis marks the single cell that is
+ * actually being calibrated (target finger × target joint) so the operator does
+ * not read the wrong number off the grid.
+ */
+function FingerJointsRow({
+  label,
+  angles,
+  highlightFinger,
+  highlightJoint,
+}: FingerJointsRowProps) {
   const cell = (v: number | undefined) =>
     typeof v === 'number' ? `${v.toFixed(1)}°` : '—';
-  const base = highlight ? 'font-semibold text-[#007AFF]' : 'text-gray-700';
+  const rowClass = highlightFinger ? 'font-semibold text-[#007AFF]' : 'text-gray-700';
   return (
     <>
-      <span className={base}>{label}</span>
-      <span className={`text-right tabular-nums ${base}`}>{cell(angles?.MCP)}</span>
-      <span className="text-right tabular-nums text-gray-400">{cell(angles?.PIP)}</span>
-      <span className="text-right tabular-nums text-gray-400">{cell(angles?.DIP)}</span>
+      <span className={rowClass}>{label}</span>
+      {ALL_TARGET_JOINTS.map((joint) => {
+        const isTargetCell = highlightFinger && joint === highlightJoint;
+        return (
+          <span
+            key={joint}
+            className={
+              'text-right tabular-nums ' +
+              (isTargetCell ? 'font-semibold text-[#007AFF]' : 'text-gray-400')
+            }
+          >
+            {cell(angles?.[joint])}
+          </span>
+        );
+      })}
     </>
   );
 }
@@ -1109,7 +1365,9 @@ function PointRow({
           'rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ' +
           (isPhoto ? 'bg-purple-100 text-purple-700' : 'bg-emerald-100 text-emerald-700')
         }
-        title={isPhoto ? point.fileName : 'En vivo'}
+        title={`${isPhoto ? point.fileName : 'En vivo'} · quiralidad ${
+          point.chirality ?? 'desconocida'
+        }`}
       >
         {isPhoto ? 'foto' : 'vivo'}
       </span>
@@ -1125,22 +1383,27 @@ function PointRow({
   );
 }
 
-function PhotoCard({
-  photo,
-  finger,
-  onClinicalChange,
-  onAddPoint,
-  onRemove,
-}: {
+type PhotoCardProps = {
   photo: ProcessedPhoto;
   finger: FingerConfig;
+  /** Clinical maximum of the joint, used only for the input placeholder. */
+  clinicalMax: number;
   onClinicalChange: (value: string) => void;
   onAddPoint: () => void;
   onRemove: () => void;
-}) {
+};
+
+function PhotoCard({
+  photo,
+  finger,
+  clinicalMax,
+  onClinicalChange,
+  onAddPoint,
+  onRemove,
+}: PhotoCardProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Render the image + MCP overlay onto the card canvas (no mirror flip).
+  // Render the image + joint overlay onto the card canvas (no mirror flip).
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1169,12 +1432,15 @@ function PhotoCard({
       const offY = (cssH - drawH) / 2;
       ctx.drawImage(img, offX, offY, drawW, drawH);
 
-      if (photo.landmarks && photo.rawMcp !== null) {
-        drawMcpOverlay(
+      // The overlay uses the photo's OWN joint, which is the one its raw angle
+      // was computed for — never the current selector.
+      if (photo.landmarks && photo.raw !== null) {
+        drawJointOverlay(
           ctx,
           photo.landmarks,
           finger,
-          photo.rawMcp,
+          photo.joint,
+          photo.raw,
           cssW,
           cssH,
           photo.imageW,
@@ -1187,7 +1453,15 @@ function PhotoCard({
     return () => {
       cancelled = true;
     };
-  }, [photo.objectUrl, photo.landmarks, photo.rawMcp, photo.imageW, photo.imageH, finger]);
+  }, [
+    photo.objectUrl,
+    photo.landmarks,
+    photo.raw,
+    photo.joint,
+    photo.imageW,
+    photo.imageH,
+    finger,
+  ]);
 
   return (
     <div className="rounded-xl border border-gray-200 p-2">
@@ -1215,9 +1489,14 @@ function PhotoCard({
           />
           <div className="mt-2 flex items-end gap-2">
             <div className="rounded-lg bg-gray-50 px-2 py-1 text-center">
-              <p className="text-[10px] uppercase tracking-wide text-gray-500">MCP crudo</p>
+              <p className="text-[10px] uppercase tracking-wide text-gray-500">
+                {photo.joint} crudo
+              </p>
               <p className="font-mono text-[15px] font-semibold tabular-nums text-gray-900">
-                {photo.rawMcp !== null ? `${photo.rawMcp.toFixed(1)}°` : '—'}
+                {photo.raw !== null ? `${photo.raw.toFixed(1)}°` : '—'}
+              </p>
+              <p className="text-[9px] uppercase tracking-wide text-gray-400">
+                {photo.chirality ?? 'sin quiralidad'}
               </p>
             </div>
             <label className="flex-1">
@@ -1228,13 +1507,13 @@ function PhotoCard({
                 step="0.1"
                 value={photo.clinicalInput}
                 onChange={(e) => onClinicalChange(e.target.value)}
-                placeholder="p.ej. 0, 45, 90"
+                placeholder={`p.ej. 0, ${Math.round(clinicalMax / 2)}, ${clinicalMax}`}
                 className="mt-1 h-9 w-full rounded-xl border border-gray-200 px-2 text-[13px] tabular-nums outline-none focus:border-[#007AFF]"
               />
             </label>
             <button
               type="button"
-              disabled={photo.rawMcp === null || photo.clinicalInput.trim() === ''}
+              disabled={photo.raw === null || photo.clinicalInput.trim() === ''}
               onClick={onAddPoint}
               className="h-9 rounded-xl bg-[#007AFF] px-3 text-[12px] font-semibold text-white disabled:bg-gray-200 disabled:text-gray-500"
             >

@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic';
  * Live MediaPipe feed with raw + normalized angles for every joint of every
  * finger, plus a wrist read-out. Used in consulta with Javi + goniómetro to
  * fill in the empirical values in `JOINT_CALIBRATION` (see
- * `docs/obsidian-vault/12-Convencion-angular.md`).
+ * `docs/mou-dev/12-Convencion-angular.md`).
  *
  * Secret-key gate (env-driven, NOT NODE_ENV-driven):
  *   - `CALIBRATION_KEY` unset/empty  → page is open (local-dev default; nobody
