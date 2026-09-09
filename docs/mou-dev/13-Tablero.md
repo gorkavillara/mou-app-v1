@@ -11,13 +11,16 @@ mou-board-version: 1
 - [ ] **IA-08** [P1] Indicador en vivo de ángulo durante ejercicio (cubierto por F-13) #ia
 - [ ] **IA-10** [P2] Estimación de calidad de movimiento (velocidad, suavidad) #ia
 - [ ] **IA-12** [P2] Modo "espejo" autovalidación #ia
-- [ ] **OPS-1** [P0] Validación con goniómetro de los `measuredOpen/measuredClosed` (Javi) #infra
+- [ ] **OPS-1** [P0] Validación con goniómetro de los `measuredOpen/measuredClosed` (Javi) — **parcialmente hecho 2026-09-09** (IA-19): PIP (R² 0,976 · medio 5,3° · máx 7,9°) y DIP (R² 0,994 · 2,7° / 4,1°) pasan el gate con holgura; **el MCP lo pasa raspando** (10,0° / 14,9°) porque su lectura 2D satura por encima de ~45°. Falta: **más puntos de captura del MCP**, la **hiperextensión** (`clinicalMin −30°`, sin ninguna pose medida) y la **muñeca** (sin calibrar, la herramienta no la mide) #infra
 - [ ] **OPS-2** [P1] Deploy a Vercel preview el 2026-05-14 + QA en iPhone real #infra
 - [ ] **IA-15** [P2] [Fase 2] D15: cámara mide MCP+PIP+DIP por dedo afectado (extiende FB-3, sólo afectados) #ia
 - [ ] **IA-16** [P2] [Fase 2] D15: HUD legible de MCP/PIP/DIP por dedo afectado + payload 3 articulaciones #ia
 - [ ] **F-20** [P2] [Fase 2] D15: progresión de ROM por articulación × dedo afectado en panel doctor #frontend
 - [ ] **F-21** [P2] [Fase 2] D15: informe/PDF con ROM completo (MCP/PIP/DIP) por dedo afectado #frontend
 - [ ] **OPS-4** [P2] [Fase 2] D15: validación goniómetro de calibración PIP/DIP (y definir muñeca) con Javi #infra
+- [ ] **IA-11** [P2] **REABIERTA 2026-09-09** — el aviso one-shot de mano equivocada nunca llegó a cablearse. Estaban el estado (`expectedHand`), los refs (`handednessSamplesRef`, `handednessFiredRef`, `expectedHandRef`) y las constantes, pero no había ninguna llamada a `readHandedness` ni ningún toast: `handednessFiredRef` no se pone a `true` en ningún sitio y `expectedHandRef.current` no se lee nunca. Se dio por hecha el 2026-05-09 sin estarlo. Además `setExpectedHand` no se llama desde ningún sitio (no existe el selector de mano en el intro), así que activarlo hoy avisaría en falso a todo paciente operado de la mano izquierda: hay que **añadir antes el selector de mano** (o derivarla de `patients`). El muestreo sí funciona ya — IA-18 lo dejó alimentando `handednessSamplesRef` #ia
+- [ ] **IA-20** [P1] Renombrar/mapear las articulaciones del **pulgar** si entra en Fase 2: en `FINGERS` el "MCP" del pulgar es en realidad la **CMC**, su "PIP" es la **MP** clínica y su "DIP" es la **IP** (el pulgar sólo tiene 2 falanges). Hoy fuera de alcance y sus lecturas son sólo informativas; antes de enseñar números de pulgar al cirujano hay que alinear la nomenclatura (ver [[12-Convencion-angular]]) #ia
+- [ ] **IA-21** [P1] Recalibrar antes del piloto con **más puntos y más sujetos**: el ajuste 2026-09-09 tiene sólo 3 posiciones por articulación, un dedo (índice), un único sujeto (una sola mano sana) y fotos comprimidas de WhatsApp. Añadir posiciones intermedias del **MCP** (satura > ~45°), al menos una pose de **hiperextensión** para medir `clinicalMin`, y repetir con 2–3 manos distintas #ia
 
 
 ## 🔧 En curso
@@ -31,6 +34,11 @@ mou-board-version: 1
 
 ## ✅ Hecho
 
+- [x] **IA-18** [P0] Bug de **quiralidad** en el signo de flexión: el cross-product 2D medía el giro en el espacio de la imagen, así que se invertía al espejar la mano o cambiar de mano (verificado: espejando las 15 fotos de goniómetro se invirtieron las 15 lecturas; handedness cambió en 14/15). En producción hacía que un puño completo se clavara en `clinicalMin` (−30°) en vez de ~90°. Fix: `sign(cross2D) · parity(handedness)` — `HandChirality`, `flexionSignFor()` y quiralidad **suavizada por sesión** (D17) ✓ 2026-09-09 #ia
+- [x] **IA-19** [P0] **Calibración goniométrica por foto** + script reproducible `npx tsx scripts/calibrate-from-photos.ts` (mismo MediaPipe y misma `calculateJointAngles` del producto, en modo IMAGE; ajuste `clinical = m·raw + b`). 15 fotos del cirujano con goniómetro en `docs/mou-dev/calibration/`. Nuevos `JOINT_CALIBRATION`: MCP −11,8/88 · PIP −1,3/76,8 · DIP −8/52,9. **Cierra OPS-1 sólo parcialmente** (ver nota en OPS-1) ✓ 2026-09-09 #ia #infra
+- [x] **OPS-5** [P1] Limpieza de **datos de test acumulados**: 430 pacientes del doctor e2e hacían que la lista midiese ~34.000 px y que los screenshots de Playwright caducasen. Datos limpiados y `npm run e2e` ejecuta ahora `e2e:cleanup` antes de cada corrida ✓ 2026-09-09 #infra
+- [x] **OPS-6** [P0] E2E de **sesión de medición real**: cámara falsa que pinta las fotos de goniómetro (`tests/patient/fake-camera.ts`) → MediaPipe detecta mano de verdad, se calculan ángulos, se normalizan, la histéresis cuenta repeticiones, la sesión llega a `done` y POSTea, y el doctor la lee de vuelta. Hasta ahora **ningún test tocaba el pipeline de medición** (los specs paran en la intro), que es justo lo que el cirujano juzga. Además es el guardián de regresión de IA-18: con el signo invertido un puño normaliza a −30° y el test falla ✓ 2026-09-09 #infra #ia
+- [x] **IA-22** [P0] Herramienta `/dev/calibration` extendida a **PIP y DIP** (antes sólo MCP): selector de articulación, overlay que dibuja los dos segmentos y el arco del vértice de la articulación elegida, límites clínicos leídos de `JOINT_CALIBRATION` (90/100/80) y invalidación de puntos al cambiar de dedo **o** de articulación. Quiralidad cableada en vídeo y en modo foto, con aviso si no hay handedness utilizable (los puntos no serían comparables). `h1` estable «Calibración articular (IA-04)» + spec e2e actualizado ✓ 2026-09-09 #ia #frontend
 - [x] **IA-17** [P0] Interfaz de calibración MCP rehecha: por dedo, overlay metacarpiano/falange/arco, captura multipunto goniómetro-referenciada (ajuste lineal + R²/error) y **calibración por foto** (subir fotos de Javi → MediaPipe modo imagen → mismo ajuste). Geometría OK; recalibración con datos reales pendiente de OPS-1 ✓ 2026-06-15 #ia
 - [x] **PRIV-2** Privacidad de la cámara: fondo difuminado (CSS) con ventana nítida de la mano (recorte elíptico del frame crudo) + recordatorio persistente "mano de perfil" en la sesión ✓ 2026-06-15 #frontend
 - [x] **B-20** [P0] FB-3: migración `rep_measurements.finger` (nullable + check 5 dedos); `amputated_fingers` deprecada ✓ 2026-06-15 #backend #infra
@@ -70,7 +78,6 @@ mou-board-version: 1
 - [x] **F-16** [P2] "Última sesión hace X" en cada fila + LastSessionBadge ✓ 2026-05-09 #frontend
 - [x] **F-12 / IA-07** Animaciones SVG (`FlexionPasivaDedos`, `ExtensionActivaDedos`, `GenericHand`) en cards e intro ✓ 2026-05-09 #ia
 - [x] **IA-09** [P1] Detección de "ejercicio mal hecho": `createRepCoaching`/`updateRepCoaching` + toast en sesión ✓ 2026-05-09 #ia
-- [x] **IA-11** [P2] Sampling de handedness MediaPipe + aviso one-shot si la mano no coincide ✓ 2026-05-09 #ia
 - [x] **B-13** [P1] Adherencia 7d/total: `patient_adherence_window(N)` + view `patient_adherence_breakdown` ✓ 2026-05-09 #backend
 - [x] **B-14** [P1] `GET /api/doctor/patients/:id/progression` (function `patient_progression`, filtra low_*) ✓ 2026-05-09 #backend
 - [x] **B-16** [P1] `audit_log` + triggers en patients (insert + discharge) y prescriptions (insert) ✓ 2026-05-09 #backend

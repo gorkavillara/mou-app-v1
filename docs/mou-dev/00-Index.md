@@ -1,7 +1,7 @@
 # 🖐️ Mou — Vault de proyecto
 
 > Vault de Obsidian para gestionar la **Fase 1: Panel del Doctor + Piloto 20 pacientes**.
-> Apertura: en Obsidian → *Open folder as vault* → seleccionar `docs/obsidian-vault/`.
+> Apertura: en Obsidian → *Open folder as vault* → seleccionar `docs/mou-dev/`.
 
 ## 🎯 Estado actual
 - **Fase 0** ✅ Vista de paciente con cámara + MediaPipe (funcional, prototipo)

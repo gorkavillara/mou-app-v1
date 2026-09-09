@@ -1,7 +1,7 @@
 # Supabase — Mou Fase 1
 
 Migraciones de base de datos para Supabase. Source of truth del schema: ver
-[`docs/obsidian-vault/06-Modelo-datos.md`](../docs/obsidian-vault/06-Modelo-datos.md).
+[`docs/mou-dev/06-Modelo-datos.md`](../docs/mou-dev/06-Modelo-datos.md).
 
 ## Aplicar la migración
 

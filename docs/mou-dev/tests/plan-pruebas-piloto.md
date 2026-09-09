@@ -171,7 +171,7 @@ Checklist técnico. Cuando esté todo ✅, avisa a Javi de que puede empezar la 
 
 ## 📋 Cómo reportar lo que falle
 
-Javi: no hace falta que sepas nada técnico. Crea un archivo nuevo en esta carpeta (`docs/obsidian-vault/tests/`) con el nombre `feedback-javi-<fecha>.md`, o si no usas Obsidian simplemente **mándale a Gorka una lista numerada** por el canal que uséis, indicando:
+Javi: no hace falta que sepas nada técnico. Crea un archivo nuevo en esta carpeta (`docs/mou-dev/tests/`) con el nombre `feedback-javi-<fecha>.md`, o si no usas Obsidian simplemente **mándale a Gorka una lista numerada** por el canal que uséis, indicando:
 
 1. **En qué pantalla** estabas (ej. "creando un paciente").
 2. **Qué hiciste** (ej. "pulsé Crear paciente").

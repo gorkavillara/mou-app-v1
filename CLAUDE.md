@@ -2,7 +2,7 @@
 
 ## ⚠️ Source of truth: Obsidian vault
 
-**Antes de tocar nada en este proyecto, leer `docs/obsidian-vault/`.** Es la fuente de verdad de:
+**Antes de tocar nada en este proyecto, leer `docs/mou-dev/`.** Es la fuente de verdad de:
 - Visión, alcance y decisiones (`02-Decisiones-clave.md`).
 - Backlog priorizado (`03-Tareas-Backend.md`, `04-Tareas-Frontend.md`, `05-Tareas-IA.md`).
 - Modelo de datos (`06-Modelo-datos.md`).
@@ -14,7 +14,7 @@ Si una decisión cambia → **actualizar el vault primero**, luego implementar. 
 Estamos en **Fase 1**: panel doctor + piloto 20 pacientes anónimos. Todo lo previo a este punto (panel admin, mensajería, mutuas, doctor antiguo) está deprecado y se está borrando — ver `08-Legado-a-eliminar.md`.
 
 ### Mantener el tablero al día
-`docs/obsidian-vault/13-Tablero.md` es un kanban con cuatro columnas: **Backlog · En curso · En revisión · Hecho**. Reglas:
+`docs/mou-dev/13-Tablero.md` es un kanban con cuatro columnas: **Backlog · En curso · En revisión · Hecho**. Reglas:
 
 1. **Antes de empezar una tarea**: moverla a *En curso* (mover la línea `- [ ]` a la columna correspondiente).
 2. **Al terminar y antes de pedir review** (o de hacer commit final si no hay review): pasarla a *En revisión* o directamente a *Hecho* si se mergea.
@@ -84,10 +84,14 @@ npm run dev          # Start dev server (Turbopack)
 npm run build        # Production build
 npm run lint         # ESLint
 npm run test         # Vitest unit suite
-npm run e2e          # Playwright e2e (creates e2e doctor + runs all projects)
+npm run e2e          # Playwright e2e (cleanup + creates e2e doctor + runs all projects)
+npm run e2e:cleanup  # Borra los datos de prueba del doctor e2e (se ejecuta solo antes de cada corrida)
 npm run e2e:headed   # Playwright e2e with visible browser
 npm run e2e:ui       # Playwright UI mode
 npm run e2e:report   # Open last HTML report under tests/.report
+
+npx tsx scripts/calibrate-from-photos.ts   # Recalibra JOINT_CALIBRATION desde las fotos de goniómetro
+                                           # (docs/mou-dev/calibration/) — ver su README
 ```
 
 ## E2E tests (Playwright)
@@ -98,7 +102,9 @@ npm run e2e:report   # Open last HTML report under tests/.report
   - `tests/helpers.ts` — `authedTest` fixture, `generatePatientId`, env constants.
   - `tests/auth.setup.ts` — logs in as the E2E doctor and saves storageState to `tests/.auth/doctor.json`.
   - `tests/login/`, `tests/doctor-list/`, `tests/doctor-detail/` — each has `*-page.ts` (POM) + `*.spec.ts` + `*.md`.
+  - `tests/patient/` — flujo del paciente. `fake-camera.ts` sustituye `getUserMedia` por un canvas que pinta las **fotos reales de goniómetro** de `docs/mou-dev/calibration/photos/`, así que `measurement-session.spec.ts` ejercita el pipeline de medición de verdad (MediaPipe → ángulos → normalización → histéresis → POST). Es el único guardián automático del fix de quiralidad (IA-18) en una sesión viva, y el test más caro de la suite: corre sólo en `chromium-desktop`.
 - **Authentication**: `scripts/create-e2e-doctor.ts` (alias `npm run e2e:bootstrap`) idempotently creates `e2e@mou.local` in Supabase Auth + `public.doctors` and resets the password to `MOU_E2E_PASSWORD` from `.env`. The auth.setup project logs that user in via the real form once per run; authed specs reuse that storage state.
+- **Datos de prueba**: `npm run e2e` ejecuta `e2e:cleanup` antes de cada corrida (borra pacientes/sesiones del doctor e2e). Sin esto se acumulan: en 2026-09-09 había 430 pacientes, la lista del doctor medía ~34.000 px y los screenshots de Playwright caducaban.
 - **Screenshots**: each spec calls `page.snap(testInfo, name)` to write a PNG to `tests/screenshots/<name>.png` AND attach it to the HTML report. Screenshots are committed to git (small, per-page snapshots; useful as a visual reference and for review).
 - **Anonymity rule**: every test patient must use `generatePatientId()` (`E2E-<timestamp>` style). NEVER use real names, emails or PII inside test data.
 - **Skill**: `.claude/skills/playwright-cli/SKILL.md` is installed for interactive browser exploration via `playwright-cli`. Use it during test design before writing assertions.

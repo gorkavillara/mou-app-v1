@@ -100,3 +100,17 @@
 **Por qué**: la geometría del lib ya media el MCP correctamente (`muñeca→MCP` = metacarpiano contra `MCP→PIP` = falange proximal); el problema era la **calibración**, capturada una sola vez con webcam, **promediada entre dedos y sin goniómetro**, por lo que los grados normalizados no eran clínicamente fiables. Ver [[12-Convencion-angular]] (nota 2026-06-15) y [[tests/feedback-gorka-2026-06-15]].
 
 **Enlaces**: se apoya en [[02-Decisiones-clave#D14]] (medición por dedo afectado, sin promediar) y queda **bloqueada en su cierre** por [[13-Tablero|OPS-1]] (validación con goniómetro por Javi), que sigue **pendiente**. Implementación en [[05-Tareas-IA#IA-17]].
+
+
+## D17 — El signo de flexión se ancla a la ANATOMÍA vía handedness, no a la imagen (bug de quiralidad, 2026-09-09)
+**Decisión**: el signo flexión(+)/extensión(−) de MCP/PIP/DIP deja de salir del producto vectorial 2D a secas y pasa a ser **`sign(cross2D) · parity(handedness)`**, usando la etiqueta de handedness de MediaPipe **suavizada a nivel de sesión** (no por frame). Toda lectura que se vaya a **normalizar o persistir** debe pasar la quiralidad; omitirla sólo vale para landmarks sintéticos en tests.
+
+**Por qué**: el producto vectorial 2D `a.x·b.y − a.y·b.x` mide el sentido de giro **en el espacio de la imagen**, no en anatomía. Se invierte cuando la mano proyectada se refleja: cuando el paciente **enseña el otro lado de la mano** a la cámara o usa **la otra mano**. Comprobado experimentalmente (Gorka, 2026-09-09): espejando horizontalmente las **15 fotos de goniómetro** del cirujano y repitiendo el mismo pipeline, **se invirtió el signo de las 15 lecturas** conservando las magnitudes (índice MCP a 90°: **−75,2° → +72,2°**; índice PIP a 90°: **−71,3° → +76,6°**), y la etiqueta de handedness se invirtió (`Right`→`Left`) en **14 de 15** (el fallo fue un puño cerrado — de ahí el suavizado por sesión).
+
+**Impacto que corrige (silencioso y grave)**: con una calibración capturada en una quiralidad, un paciente que presentara la contraria daba **flexión negativa en todo el rango** y `normalizeJointAngle` clavaba un **puño completo en `clinicalMin` (−30°)** en lugar de ~90°. Es una explicación de peso de por qué el cirujano no se fiaba de los números.
+
+**Implementación** (`src/lib/hand-tracking.ts`): tipo `HandChirality`, función `flexionSignFor(chirality)` (−1 para `'Right'`, +1 si no; anclada empíricamente en el set de goniómetro) y firmas `calculateJointAngles(landmarks, finger, chirality?)` / `calculateAllJointAngles(landmarks, chirality?)`. Ambos factores del producto se invierten a la vez, así que el signo resultante es **invariante al espejo y a mano izquierda/derecha**.
+
+**Consecuencia**: la calibración de **2026-06-06** (MCP 12,3 / 98,8) se tomó en la **quiralidad opuesta**, por lo que su `measuredOpen` del MCP tenía el signo cambiado: **queda invalidada** y la sustituye el ajuste goniométrico de 2026-09-09.
+
+**Enlaces**: [[12-Convencion-angular]] (sección "Convención de signo: anclada a la anatomía"), [[13-Tablero|IA-18]] (bug) e [[13-Tablero|IA-19]] (calibración goniométrica que lo destapó). Depende de [[02-Decisiones-clave#D16]] (herramienta de calibración) y afecta a [[02-Decisiones-clave#D10]] (normalización 0–90°).

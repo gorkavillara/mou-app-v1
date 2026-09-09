@@ -13,7 +13,7 @@ Skill específica del proyecto para operar contra el Supabase de Mou (panel del 
 - **Project ref**: `qkvujadxflslsfkezxpo`
 - **Project URL**: `https://qkvujadxflslsfkezxpo.supabase.co`
 - **Región**: eu-west-1 (AWS)
-- **Schema autoritativo**: [docs/obsidian-vault/06-Modelo-datos.md](../../../docs/obsidian-vault/06-Modelo-datos.md)
+- **Schema autoritativo**: [docs/mou-dev/06-Modelo-datos.md](../../../docs/mou-dev/06-Modelo-datos.md)
 - **Migraciones**: [supabase/migrations/](../../../supabase/migrations/)
 
 ## Configuración del MCP
@@ -83,7 +83,7 @@ mcp__supabase__get_logs(service="postgres" | "api" | "auth")
 
 ## Convenciones específicas de Mou
 
-- **No PII en `patients`**: `name`, `email`, `phone`, `dob` están prohibidas explícitamente. Si surge la necesidad, primero actualizar [docs/obsidian-vault/02-Decisiones-clave.md](../../../docs/obsidian-vault/02-Decisiones-clave.md) (D3) y luego migrar.
+- **No PII en `patients`**: `name`, `email`, `phone`, `dob` están prohibidas explícitamente. Si surge la necesidad, primero actualizar [docs/mou-dev/02-Decisiones-clave.md](../../../docs/mou-dev/02-Decisiones-clave.md) (D3) y luego migrar.
 - **RLS por doctor**: todas las tablas de paciente filtran por `doctor_id = auth.uid()`. El acceso del paciente vía URL bypassa RLS usando `service_role` desde el endpoint Next.js — nunca exponer el `service_role` al cliente.
 - **Migraciones inmutables**: una vez aplicada y fuera de la rama de desarrollo, no editar la SQL — añadir una migración nueva.
 
