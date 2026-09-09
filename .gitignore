@@ -52,3 +52,8 @@ next-env.d.ts
 
 # Per-developer Claude Code permissions (keep .claude/settings.json shared)
 .claude/settings.local.json
+
+# Overlays de calibracion: evidencia visual derivada, regenerable con
+# `npx tsx scripts/calibrate-from-photos.ts --overlays`. Las fotos y el
+# informe si se versionan (son la fuente y el resultado del ajuste).
+docs/mou-dev/calibration/overlays/

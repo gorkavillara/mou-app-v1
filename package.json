@@ -13,9 +13,11 @@
     "db:migrate": "tsx scripts/apply-migrations.ts",
     "db:migrate:status": "tsx scripts/apply-migrations.ts --status",
     "e2e:bootstrap": "tsx scripts/create-e2e-doctor.ts",
-    "e2e": "npm run e2e:bootstrap && playwright test",
-    "e2e:headed": "npm run e2e:bootstrap && playwright test --headed",
-    "e2e:ui": "npm run e2e:bootstrap && playwright test --ui",
+    "e2e:cleanup": "tsx scripts/cleanup-e2e-data.ts --confirm",
+    "e2e:prepare": "npm run e2e:cleanup && npm run e2e:bootstrap",
+    "e2e": "npm run e2e:prepare && playwright test",
+    "e2e:headed": "npm run e2e:prepare && playwright test --headed",
+    "e2e:ui": "npm run e2e:prepare && playwright test --ui",
     "e2e:report": "playwright show-report tests/.report"
   },
   "dependencies": {

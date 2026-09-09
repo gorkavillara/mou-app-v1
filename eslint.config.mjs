@@ -12,6 +12,16 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The Obsidian vault ships the editor's own vendored, minified plugin
+    // bundles. Linting them drowned `npm run lint` in ~318 errors / 4600
+    // warnings of third-party noise, which made the command useless as a
+    // quality gate — a real failure would never have been noticed in there.
+    "docs/**/.obsidian/**",
+    // Playwright's generated HTML report and run artifacts — vendored bundles,
+    // same problem as above.
+    "tests/.report/**",
+    "tests/.output/**",
+    "tests/.snapshots/**",
   ]),
 ]);
 
