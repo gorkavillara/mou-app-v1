@@ -1,0 +1,140 @@
+{
+  "source": "WhatsApp Javi/Gorka 2026-09-09 (goniometro)",
+  "photos": [
+    {
+      "file": "indice-MCP-000.png",
+      "finger": "indice",
+      "joint": "MCP",
+      "clinical": 0,
+      "caption": "2º dedo MP 0º",
+      "width": 240,
+      "height": 320
+    },
+    {
+      "file": "indice-MCP-045.png",
+      "finger": "indice",
+      "joint": "MCP",
+      "clinical": 45,
+      "caption": "2º dedo MP 45º",
+      "width": 330,
+      "height": 256
+    },
+    {
+      "file": "indice-MCP-090.png",
+      "finger": "indice",
+      "joint": "MCP",
+      "clinical": 90,
+      "caption": "2º dedo MP 90º",
+      "width": 240,
+      "height": 252
+    },
+    {
+      "file": "indice-PIP-000.png",
+      "finger": "indice",
+      "joint": "PIP",
+      "clinical": 0,
+      "caption": "2º dedo PIP 0º",
+      "width": 330,
+      "height": 310
+    },
+    {
+      "file": "indice-PIP-045.png",
+      "finger": "indice",
+      "joint": "PIP",
+      "clinical": 45,
+      "caption": "2º dedo PIP 45º",
+      "width": 330,
+      "height": 274
+    },
+    {
+      "file": "indice-PIP-090.png",
+      "finger": "indice",
+      "joint": "PIP",
+      "clinical": 90,
+      "caption": "2º dedo PIP 90º",
+      "width": 330,
+      "height": 284
+    },
+    {
+      "file": "indice-DIP-000.png",
+      "finger": "indice",
+      "joint": "DIP",
+      "clinical": 0,
+      "caption": "2º dedo DIP 0º",
+      "width": 330,
+      "height": 238
+    },
+    {
+      "file": "indice-DIP-045.png",
+      "finger": "indice",
+      "joint": "DIP",
+      "clinical": 45,
+      "caption": "2º dedo DIP 45º",
+      "width": 330,
+      "height": 264
+    },
+    {
+      "file": "indice-DIP-090.png",
+      "finger": "indice",
+      "joint": "DIP",
+      "clinical": 90,
+      "caption": "2º dedo DIP 90º",
+      "width": 330,
+      "height": 261
+    },
+    {
+      "file": "pulgar-MP-000.png",
+      "finger": "pulgar",
+      "joint": "MP",
+      "clinical": 0,
+      "caption": "Pulgar 1er dedo MP 0º",
+      "width": 330,
+      "height": 197
+    },
+    {
+      "file": "pulgar-MP-045.png",
+      "finger": "pulgar",
+      "joint": "MP",
+      "clinical": 45,
+      "caption": "Pulgar 1er dedo MP 45º",
+      "width": 330,
+      "height": 194
+    },
+    {
+      "file": "pulgar-MP-055.png",
+      "finger": "pulgar",
+      "joint": "MP",
+      "clinical": 55,
+      "caption": "Pulgar 1er dedo MP 55º",
+      "width": 330,
+      "height": 217
+    },
+    {
+      "file": "pulgar-IP-000.png",
+      "finger": "pulgar",
+      "joint": "IP",
+      "clinical": 0,
+      "caption": "Pulgar 1er dedo IP 0º",
+      "width": 330,
+      "height": 213
+    },
+    {
+      "file": "pulgar-IP-045.png",
+      "finger": "pulgar",
+      "joint": "IP",
+      "clinical": 45,
+      "caption": "Pulgar 1er dedo IP 45º",
+      "width": 330,
+      "height": 196
+    },
+    {
+      "file": "pulgar-IP-080.png",
+      "finger": "pulgar",
+      "joint": "IP",
+      "clinical": 80,
+      "caption": "Pulgar 1er dedo IP 80º",
+      "width": 330,
+      "height": 196
+    }
+  ]
+}
