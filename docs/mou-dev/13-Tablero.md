@@ -7,11 +7,12 @@ mou-board-version: 1
 
 ## 📥 Backlog
 
-- [ ] **B-17** [P1] Documento legal para director médico (Gorka) — borrador de carta en `legal/carta-direccion-hospital.md` #backend
+- [ ] **B-17** [P1] Documento legal para director médico (Gorka). Borradores listos en `legal/`: [[carta-direccion-hospital|carta]], [[consentimiento-informado|hoja de información + consentimiento]] y [[anexo-tratamiento-datos|anexo técnico de tratamiento de datos]]. **Bloqueado por 5 decisiones que no son técnicas** y que hay que resolver con el hospital: (1) quién es el responsable del tratamiento y si hace falta contrato de encargo art. 28 con Mou; (2) región del proyecto Supabase (si no es UE, transferencia internacional); (3) plazo de conservación; (4) contactos reales del responsable y del DPD; (5) si procede comité de ética/EIPD. ⚠️ Corregida en la carta la frase «no se tratarán datos reales ni personales»: los datos están **seudonimizados, no anonimizados**, y siguen siendo datos de salud bajo RGPD — decirle lo contrario al DPD nos deja en mal lugar. Los tres documentos necesitan revisión del DPD antes de enviarse #backend
 - [ ] **IA-08** [P1] Indicador en vivo de ángulo durante ejercicio (cubierto por F-13) #ia
 - [ ] **IA-10** [P2] Estimación de calidad de movimiento (velocidad, suavidad) #ia
 - [ ] **IA-12** [P2] Modo "espejo" autovalidación #ia
 - [ ] **OPS-1** [P0] Validación con goniómetro de los `measuredOpen/measuredClosed` (Javi) — **parcialmente hecho 2026-09-09** (IA-19): PIP (R² 0,976 · medio 5,3° · máx 7,9°) y DIP (R² 0,994 · 2,7° / 4,1°) pasan el gate con holgura; **el MCP lo pasa raspando** (10,0° / 14,9°) porque su lectura 2D satura por encima de ~45°. Falta: **más puntos de captura del MCP**, la **hiperextensión** (`clinicalMin −30°`, sin ninguna pose medida) y la **muñeca** (sin calibrar, la herramienta no la mide) #infra
+- [ ] **OPS-7** [P1] **Dos proyectos Vercel desplegando el mismo repo a producción**: `mou-app-v1` y `mou-v1`, ambos vivos (`mou-app-v1.vercel.app` y `mou-v1.vercel.app`) y ambos contra la MISMA base de datos. Decidir cuál es la buena, apagar la otra y fijar `NEXT_PUBLIC_APP_URL` — hoy el QR del paciente embebe el host desde el que lo generó el médico, así que según por dónde entre Javi el paciente recibe una URL u otra #infra
 - [ ] **OPS-2** [P1] Deploy a Vercel preview el 2026-05-14 + QA en iPhone real #infra
 - [ ] **IA-15** [P2] [Fase 2] D15: cámara mide MCP+PIP+DIP por dedo afectado (extiende FB-3, sólo afectados) #ia
 - [ ] **IA-16** [P2] [Fase 2] D15: HUD legible de MCP/PIP/DIP por dedo afectado + payload 3 articulaciones #ia

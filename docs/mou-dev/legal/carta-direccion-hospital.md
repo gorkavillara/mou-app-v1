@@ -1,16 +1,17 @@
 ---
 tipo: documento-legal
 relacionada: "[[03-Tareas-Backend#B-17]] · [[02-Decisiones-clave#D13]]"
+adjuntos: "[[consentimiento-informado]] · [[anexo-tratamiento-datos]]"
 firma: Dr. Javi (cirujano de mano, lidera el piloto)
 destinatario: Dirección Médica del hospital
-fecha: 2026-06-15
+fecha: "[fecha de envío]"
 ---
 
 > **Contexto**: carta formal de solicitud de visto bueno para el estudio piloto de rehabilitación asistida con la plataforma Mou. La **firma y envía el Dr. Javi** a la **Dirección / Director Médico del hospital**. Cubre la tarea **B-17** ([[03-Tareas-Backend#B-17]]) y la decisión **D13** ([[02-Decisiones-clave#D13]]). Sustituir los datos entre corchetes antes de enviar.
 
 ---
 
-[Ciudad], 15 de junio de 2026
+[Ciudad], [fecha de envío]
 
 **[Nombre del hospital]**
 A la atención de la Dirección Médica
@@ -26,11 +27,13 @@ Se trata de un **estudio piloto de rehabilitación asistida** apoyado en la plat
 
 Quiero subrayar que el piloto se enmarca exclusivamente en la **fase de rehabilitación asistida**: la plataforma **no sustituye ni modifica el tratamiento** indicado a cada paciente, sino que lo acompaña y aporta mediciones. **No introduce ningún riesgo ni perjuicio adicional** para el paciente, ya que se limita a registrar el movimiento de la mano mediante la cámara, sin ninguna intervención sobre la persona.
 
-En cuanto a la **protección de datos**, que considero el punto más relevante, deseo trasladarle con claridad lo siguiente: **no se tratarán datos reales ni personales de los pacientes**. A cada paciente se le asignará únicamente un **identificador numérico**; la plataforma **no almacena nombres, ni datos de contacto, ni datos sensibles**. La correspondencia entre dicho identificador y la persona permanecerá **exclusivamente bajo el control del facultativo, fuera de la plataforma**. Este planteamiento es coherente con el marco de protección de datos vigente (RGPD), al evitar el almacenamiento de información identificativa en el sistema.
+En cuanto a la **protección de datos**, que considero el punto más relevante, deseo trasladarle con claridad lo siguiente: **en la plataforma no se almacenará ningún dato identificativo directo del paciente**. A cada paciente se le asignará únicamente un **código**; el sistema **no almacena nombres, ni apellidos, ni documento de identidad, ni datos de contacto, ni fecha de nacimiento**. La correspondencia entre dicho código y la persona permanecerá **exclusivamente bajo el control del facultativo, fuera de la plataforma** (seudonimización). Debo precisar, no obstante, que los datos así tratados **siguen teniendo la consideración de datos de salud a efectos del RGPD**, por lo que quedarán sometidos al régimen y a las garantías que la Dirección y el Delegado de Protección de Datos establezcan; a tal efecto adjunto un anexo técnico con el detalle de los campos registrados, el alojamiento y los accesos.
 
-Asimismo, a **todos los pacientes** incluidos se les **entregará y solicitará un consentimiento informado previo** a su participación, de manera que su inclusión en el estudio sea siempre voluntaria e informada.
+Merece mención expresa que **el vídeo de la cámara no se graba, no se transmite y no se almacena en ningún momento**: el análisis del movimiento se realiza en tiempo real en el propio dispositivo del paciente y lo único que se registra son los valores numéricos de los ángulos y el recuento de repeticiones.
 
-El **alcance** previsto es la monitorización de **30 pacientes** en fase de rehabilitación.
+Asimismo, a **todos los pacientes** incluidos se les **entregará y solicitará un consentimiento informado previo** a su participación, de manera que su inclusión en el estudio sea siempre voluntaria e informada. Se adjunta el modelo de hoja de información y consentimiento previsto.
+
+El **alcance** previsto es la monitorización de hasta **30 pacientes** en fase de rehabilitación (el piloto arranca con 20; ver [[07-Plan-piloto-20-pacientes]]). <!-- REVISAR antes de enviar: decidir si se pide autorización para 20 o para 30. Pedir margen es razonable, pero que el número sea deliberado y no un descuadre. -->
 
 Por todo lo anterior, le solicito tenga a bien otorgar la **autorización y el visto bueno de la Dirección** para iniciar este estudio piloto. Quedo a su entera disposición para ampliar cuanta información precise, facilitar la documentación complementaria que estime oportuna o mantener una reunión al respecto.
 
