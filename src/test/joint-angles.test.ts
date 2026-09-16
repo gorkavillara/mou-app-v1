@@ -3,8 +3,11 @@ import {
   calculateJointAngles,
   calculateAllJointAngles,
   calculateWristAngle,
+  createViewSideTracker,
   flexionSignFor,
   normalizeJointAngle,
+  readViewSide,
+  updateViewSideTracker,
   normalizeFingerJointAngles,
   JOINT_CALIBRATION,
   FINGERS,
@@ -321,6 +324,90 @@ describe('calculateJointAngles — chirality invariance', () => {
     for (const f of FINGERS) {
       expect(left[f.name].MCP).toBeCloseTo(right[f.name].MCP, 6);
     }
+  });
+});
+
+// View-side bug (2026-09-16, Javi's first iPhone session). The same hand shown
+// from its little-finger edge instead of its thumb edge is a real ROTATION, not
+// a mirror: MediaPipe still labels it `Right`, yet the 2D rotational sense of
+// every joint flips. With only the label, a straight index read +28° and a 90°
+// MCP clamped to −30°. The knuckles' depth order carries the missing parity.
+describe('calculateJointAngles — view-side invariance', () => {
+  /** Profile hand seen from the thumb side: index knuckle nearer the camera. */
+  function radialView(lms: Point[]): Point[] {
+    const out = lms.map((p) => ({ ...p }));
+    out[5] = { ...out[5], z: -0.5 };
+    out[17] = { ...out[17], z: 0.5 };
+    return out;
+  }
+
+  /** Turn the hand round (180° about the image's vertical axis). */
+  function turnRound(lms: Point[]): Point[] {
+    return lms.map((p) => ({ x: -p.x, y: p.y, z: -p.z }));
+  }
+
+  it('readViewSide tells the thumb edge from the little-finger edge', () => {
+    const radial = radialView(indexBent90AtMCP());
+    expect(readViewSide(radial)).toBe('radial');
+    expect(readViewSide(turnRound(radial))).toBe('ulnar');
+  });
+
+  it('readViewSide refuses to guess when the hand is not in profile', () => {
+    // Knuckles side by side in the image plane (palm or back to the camera).
+    const lms = indexBent90AtMCP();
+    lms[5] = { x: -1, y: 2, z: 0 };
+    lms[17] = { x: 1, y: 2, z: 0.1 };
+    expect(readViewSide(lms)).toBeNull();
+  });
+
+  it('flexionSignFor: ulnar inverts the hand parity', () => {
+    expect(flexionSignFor('Right', 'radial')).toBe(-1);
+    expect(flexionSignFor('Right', 'ulnar')).toBe(1);
+    expect(flexionSignFor('Left', 'ulnar')).toBe(-1);
+  });
+
+  it('the same right hand turned round reads THE SAME angle on every joint', () => {
+    const radial = radialView(indexBent90AtMCP());
+    radial[7] = { x: 1.5, y: 3.5, z: 0 };
+    radial[8] = { x: 2, y: 4.4, z: 0 };
+    const ulnar = turnRound(radial);
+    const fromThumbSide = calculateJointAngles(radial, indexFinger, 'Right', readViewSide(radial)!);
+    const fromPinkySide = calculateJointAngles(ulnar, indexFinger, 'Right', readViewSide(ulnar)!);
+    expect(fromPinkySide.MCP).toBeCloseTo(fromThumbSide.MCP, 6);
+    expect(fromPinkySide.PIP).toBeCloseTo(fromThumbSide.PIP, 6);
+    expect(fromPinkySide.DIP).toBeCloseTo(fromThumbSide.DIP, 6);
+  });
+
+  it('WITHOUT the view side, the pinky-side view clamps real flexion to clinicalMin — the bug', () => {
+    const radial = radialView(indexBent90AtMCP());
+    const correct = normalizeJointAngle(
+      calculateJointAngles(radial, indexFinger, 'Right', 'radial').MCP,
+      'MCP',
+    );
+    const labelOnly = normalizeJointAngle(
+      calculateJointAngles(turnRound(radial), indexFinger, 'Right').MCP,
+      'MCP',
+    );
+    expect(correct).toBeGreaterThan(50);
+    expect(labelOnly).toBeCloseTo(JOINT_CALIBRATION.MCP.clinicalMin!, 5);
+  });
+});
+
+describe('updateViewSideTracker', () => {
+  const feed = (readings: Array<'radial' | 'ulnar' | null>) =>
+    readings.reduce(updateViewSideTracker, createViewSideTracker());
+
+  it('takes the first confident reading straight away', () => {
+    expect(feed([null, 'ulnar']).side).toBe('ulnar');
+  });
+
+  it('ignores a short burst of the other side', () => {
+    expect(feed(['radial', 'ulnar', 'ulnar', 'ulnar', 'radial']).side).toBe('radial');
+  });
+
+  it('follows a sustained change, with non-profile frames not breaking the streak', () => {
+    const turned = feed(['radial', ...Array(4).fill('ulnar'), null, ...Array(4).fill('ulnar')]);
+    expect(turned.side).toBe('ulnar');
   });
 });
 

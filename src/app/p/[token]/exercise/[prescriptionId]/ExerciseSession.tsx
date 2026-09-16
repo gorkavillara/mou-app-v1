@@ -8,11 +8,14 @@ import {
   JOINT_CALIBRATION,
   calculateAllJointAngles,
   createRepCoaching,
+  createViewSideTracker,
   drawHand,
   normalizeJointAngle,
   readHandedness,
+  readViewSide,
   summarizeHandednessSamples,
   updateRepCoaching,
+  updateViewSideTracker,
   type FingerAngles,
   type FingerJointAngles,
   type FingerName,
@@ -23,6 +26,7 @@ import {
   type JointName,
   type Point,
   type RepCoachingState,
+  type ViewSideTracker,
 } from '@/lib/hand-tracking';
 import type { TrackedJoint } from '@/lib/database.types';
 import { ExerciseAnimation } from '@/components/exercise-animation';
@@ -361,6 +365,16 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   // `null` = still in warm-up, we do not measure yet (see `processLandmarks`).
   const sessionChiralityRef = useRef<HandChirality | null>(null);
 
+  // VIEW SIDE — the second half of the flexion sign. The handedness label does
+  // not change when the patient shows the thumb side or the little-finger side
+  // of the same hand, but the image rotational sense does (Javi's first iPhone
+  // session, 2026-09-16: ulnar side to the front camera → straight finger +28°,
+  // 90° MCP clamped to −30°). Unlike chirality this one is FOLLOWED, debounced,
+  // because turning the hand round is a real change the patient can make
+  // mid-session (see `updateViewSideTracker`). `side === null` = the hand has
+  // not yet been seen in profile, and we do not measure.
+  const viewSideTrackerRef = useRef<ViewSideTracker>(createViewSideTracker());
+
   // Keep the ref in sync with the state so the rAF callbacks see the latest
   // toggle value without rebinding the loop.
   useEffect(() => {
@@ -532,7 +546,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
 
   const processLandmarks = useCallback(
     (landmarks: Point[] | null) => {
-      // Chirality warm-up gate. Until the session verdict is fixed we cannot
+      // Chirality + view-side warm-up gate. Until both are known we cannot
       // tell flexion from extension, and measuring with a possibly inverted
       // sign is strictly worse than not measuring: a mirrored fist reads −90°
       // and gets clamped to `clinicalMin`, which looks like a real (terrible)
@@ -542,7 +556,8 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
       // smoothing history, so the rep counter and the HUD start from a clean
       // state the moment the verdict lands (a few tenths of a second in).
       const chirality = sessionChiralityRef.current;
-      if (chirality === null) return;
+      const viewSide = viewSideTrackerRef.current.side;
+      if (chirality === null || viewSide === null) return;
 
       const rec = currentRepRef.current;
       rec.framesTotal += 1;
@@ -551,7 +566,11 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
         return;
       }
 
-      const allRaw: FingerJointAngles = calculateAllJointAngles(landmarks, chirality);
+      const allRaw: FingerJointAngles = calculateAllJointAngles(
+        landmarks,
+        chirality,
+        viewSide,
+      );
 
       // FB-1: the fingers contributing to the rep driver + per-finger peaks are
       // the resolved driver set (injured fingers, or the target selection minus
@@ -755,6 +774,12 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     // handedness label only travels in the raw MediaPipe result, which is why
     // this lives here and not in `processLandmarks`.
     updateChiralityVerdict(result);
+    if (hand) {
+      viewSideTrackerRef.current = updateViewSideTracker(
+        viewSideTrackerRef.current,
+        readViewSide(hand),
+      );
+    }
 
     // Resize canvas to match its on-screen size for crisp rendering.
     const rect = canvas.getBoundingClientRect();
@@ -780,6 +805,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
       const rawAngles = calculateAllJointAngles(
         hand,
         sessionChiralityRef.current ?? undefined,
+        viewSideTrackerRef.current.side ?? undefined,
       );
       const fingerAngles: FingerAngles = {
         pulgar: Math.round(normalizeJointAngle(rawAngles.pulgar.MCP, 'MCP')),
@@ -1105,6 +1131,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     // differently, so the chirality verdict is re-earned from scratch (it is
     // deliberately NOT reset between sets — see `resumeSet`).
     sessionChiralityRef.current = null;
+    viewSideTrackerRef.current = createViewSideTracker();
     displayHistoryRef.current = [];
     displayAngleRef.current = 0;
     displayPeakRef.current = 0;

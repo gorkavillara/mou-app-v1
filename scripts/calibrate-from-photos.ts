@@ -38,6 +38,7 @@ import {
   JOINT_CALIBRATION,
   calculateJointAngles,
   normalizeJointAngle,
+  readViewSide,
   type FingerConfig,
   type FingerName,
   type HandChirality,
@@ -180,11 +181,13 @@ async function main() {
         : (photo.joint as JointName);
 
     const fingerConfig = FINGERS.find((f) => f.name === photo.finger)!;
-    // Pass the detected chirality: without it the sign of every reading is a
-    // function of how the hand was presented to the lens, not of anatomy.
+    // Pass the detected chirality and view side: without them the sign of every
+    // reading is a function of how the hand was presented to the lens, not of
+    // anatomy.
     const chirality = det.handedness?.categoryName as HandChirality | undefined;
+    const viewSide = det.landmarks ? readViewSide(det.landmarks) : null;
     const raw = det.landmarks
-      ? calculateJointAngles(det.landmarks, fingerConfig, chirality)[
+      ? calculateJointAngles(det.landmarks, fingerConfig, chirality, viewSide ?? undefined)[
           libJoint as 'MCP' | 'PIP' | 'DIP'
         ]
       : null;
@@ -202,7 +205,7 @@ async function main() {
       `  ${photo.file.padEnd(20)} ${String(photo.clinical).padStart(3)}° goniómetro → ` +
         (raw === null
           ? 'SIN MANO DETECTADA'
-          : `${round(raw).toString().padStart(7)}° crudo (${det.attempt}, ${chirality ?? '?'})`),
+          : `${round(raw).toString().padStart(7)}° crudo (${det.attempt}, ${chirality ?? '?'}, ${viewSide ?? 'sin perfil'})`),
     );
   }
 

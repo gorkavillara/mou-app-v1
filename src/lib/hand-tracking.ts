@@ -785,9 +785,53 @@ export type HandChirality = 'Left' | 'Right';
  * anchored empirically on the goniometer set: a real right hand in a
  * non-mirrored photo is labelled `Right` and reads NEGATIVE while flexing, so
  * `Right` carries −1.
+ *
+ * VIEW-SIDE BUG (2026-09-16, Javi's first iPhone session: a straight index read
+ * +28° and a 90° MCP read −30°). The label alone is NOT enough. The image
+ * rotational sense also flips when the SAME hand is shown from the other side —
+ * thumb side (radial) vs little-finger side (ulnar) towards the lens — and the
+ * handedness label does not flip with it: a right hand is still `Right`. The
+ * goniometer set is all radial views; Javi, holding the phone in one hand and
+ * facing the front camera, naturally showed the ulnar side, so every reading
+ * came out inverted and full flexion clamped to `clinicalMin`. `viewSide`
+ * (see `readViewSide`) carries that second parity; radial is the anchor.
  */
-export function flexionSignFor(chirality?: HandChirality): 1 | -1 {
-  return chirality === 'Right' ? -1 : 1;
+export function flexionSignFor(chirality?: HandChirality, viewSide?: HandViewSide): 1 | -1 {
+  const handParity = chirality === 'Right' ? -1 : 1;
+  return viewSide === 'ulnar' ? (-handParity as 1 | -1) : handParity;
+}
+
+/**
+ * Which edge of the hand faces the camera in a profile view: `radial` = thumb /
+ * index side, `ulnar` = little-finger side.
+ */
+export type HandViewSide = 'radial' | 'ulnar';
+
+// Minimum share of the index-MCP→pinky-MCP axis that must point along the depth
+// axis to call a view side. In a true profile that axis is almost pure depth:
+// on the goniometer set the 9 index photos read +0.94…+1.00, while the thumb
+// photos (hand not in profile) read −0.20…+0.02. Below this the hand is not in
+// profile, the depth order of the knuckles is noise, and we return `null`.
+const VIEW_SIDE_MIN_DEPTH_RATIO = 0.5;
+
+/**
+ * Reads the view side from MediaPipe's relative depth (`z`, smaller = closer to
+ * the camera). In a profile view the index and pinky knuckles sit one behind
+ * the other: index MCP nearer → radial view; pinky MCP nearer → ulnar view.
+ * Returns `null` when the hand is not in profile enough to tell.
+ */
+export function readViewSide(landmarks: Point[]): HandViewSide | null {
+  const indexMcp = landmarks[5];
+  const pinkyMcp = landmarks[17];
+  const dx = pinkyMcp.x - indexMcp.x;
+  const dy = pinkyMcp.y - indexMcp.y;
+  const dz = pinkyMcp.z - indexMcp.z;
+  const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  if (length === 0) return null;
+  const depthRatio = dz / length;
+  if (depthRatio >= VIEW_SIDE_MIN_DEPTH_RATIO) return 'radial';
+  if (depthRatio <= -VIEW_SIDE_MIN_DEPTH_RATIO) return 'ulnar';
+  return null;
 }
 
 /**
@@ -805,6 +849,8 @@ export function flexionSignFor(chirality?: HandChirality): 1 | -1 {
  *   image projection happened to give, which is not a clinical quantity (see
  *   `flexionSignFor`). Omitting it keeps the legacy, chirality-dependent sign
  *   and is only appropriate for synthetic landmarks in tests.
+ * @param viewSide Which edge of the hand faces the camera (`readViewSide`).
+ *   Omitted = radial, the side the calibration was captured on.
  *
  * BUG-4 (surgeon feedback 2026-05-20: "NO MARCA LA EXTENSIÓN DE LAS
  * INTERFALÁNGICAS"): PIP and DIP previously returned magnitude only, so an
@@ -821,6 +867,7 @@ export function calculateJointAngles(
   landmarks: Point[],
   finger: FingerConfig,
   chirality?: HandChirality,
+  viewSide?: HandViewSide,
 ): JointAngles {
   const wrist = landmarks[0];
   const mcp = landmarks[finger.mcpIndex];
@@ -828,7 +875,7 @@ export function calculateJointAngles(
   const dip = landmarks[finger.dipIndex];
   const tip = landmarks[finger.tipIndex];
 
-  const sign = flexionSignFor(chirality);
+  const sign = flexionSignFor(chirality, viewSide);
 
   // MCP: wrist→MCP versus MCP→PIP. Preserve sign for hyperextension.
   const a1x = mcp.x - wrist.x, a1y = mcp.y - wrist.y, a1z = mcp.z - wrist.z;
@@ -858,12 +905,49 @@ export function calculateJointAngles(
 export function calculateAllJointAngles(
   landmarks: Point[],
   chirality?: HandChirality,
+  viewSide?: HandViewSide,
 ): FingerJointAngles {
   const out = {} as FingerJointAngles;
   for (const finger of FINGERS) {
-    out[finger.name] = calculateJointAngles(landmarks, finger, chirality);
+    out[finger.name] = calculateJointAngles(landmarks, finger, chirality, viewSide);
   }
   return out;
+}
+
+/**
+ * Sticky, debounced view side for a live session. A reading only replaces the
+ * current side after `VIEW_SIDE_SWITCH_FRAMES` consecutive confident frames of
+ * the other side, so one bad depth estimate (a closed fist occluding the
+ * knuckles) cannot invert a frame, while a patient who really turns the hand
+ * round is followed within a fraction of a second. Frames that are not in
+ * profile (`null`) neither confirm nor break the streak.
+ */
+export type ViewSideTracker = {
+  side: HandViewSide | null;
+  pendingSide: HandViewSide | null;
+  pendingFrames: number;
+};
+
+// ~0.25 s at 30 fps.
+const VIEW_SIDE_SWITCH_FRAMES = 8;
+
+export function createViewSideTracker(): ViewSideTracker {
+  return { side: null, pendingSide: null, pendingFrames: 0 };
+}
+
+export function updateViewSideTracker(
+  tracker: ViewSideTracker,
+  reading: HandViewSide | null,
+): ViewSideTracker {
+  if (reading === null) return tracker;
+  if (reading === tracker.side) return { ...tracker, pendingSide: null, pendingFrames: 0 };
+  const pendingFrames = reading === tracker.pendingSide ? tracker.pendingFrames + 1 : 1;
+  // The first confident reading of a session is taken as-is: there is no
+  // previous side to protect, and the chirality warm-up already absorbs noise.
+  if (tracker.side === null || pendingFrames >= VIEW_SIDE_SWITCH_FRAMES) {
+    return { side: reading, pendingSide: null, pendingFrames: 0 };
+  }
+  return { ...tracker, pendingSide: reading, pendingFrames };
 }
 
 /**

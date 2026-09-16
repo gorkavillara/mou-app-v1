@@ -8,6 +8,7 @@ import {
   calculateJointAngles,
   drawHand,
   normalizeJointAngle,
+  readViewSide,
   DEFAULT_FINGER_STATUS,
   type FingerConfig,
   type FingerJointAngles,
@@ -609,10 +610,15 @@ export function CalibrationView() {
       };
       liveVisibilityRef.current = avgVisibility(hand);
 
-      // Chirality MUST travel with the landmarks: the flexion sign is measured
-      // in image space and flips when the projected hand is mirrored, so a
-      // reading taken without it is not a clinical quantity (see `flexionSignFor`).
-      const all: FingerJointAngles = calculateAllJointAngles(hand, chirality);
+      // Chirality and view side MUST travel with the landmarks: the flexion
+      // sign is measured in image space and flips when the projected hand is
+      // mirrored or shown from the other edge, so a reading taken without them
+      // is not a clinical quantity (see `flexionSignFor`).
+      const all: FingerJointAngles = calculateAllJointAngles(
+        hand,
+        chirality,
+        readViewSide(hand) ?? undefined,
+      );
       liveFingerJointsRef.current = all;
 
       const videoW = video.videoWidth || rect.width;
@@ -838,14 +844,20 @@ export function CalibrationView() {
               base.error = 'No se ha detectado ninguna mano en la foto.';
             } else {
               // Same rule as the live loop: sign the reading with the chirality
-              // MediaPipe reports for THIS photo. A photo of the other side of
-              // the hand would otherwise contribute an inverted raw value.
+              // and view side of THIS photo. A photo of the other hand, or of the
+              // other edge of the hand, would otherwise contribute an inverted
+              // raw value.
               const chirality = toChirality(pickHandedness(result, 0)?.categoryName);
               base.landmarks = hand;
               base.chirality = chirality;
               base.imageW = img.naturalWidth;
               base.imageH = img.naturalHeight;
-              base.raw = calculateJointAngles(hand, cfg, chirality)[joint];
+              base.raw = calculateJointAngles(
+                hand,
+                cfg,
+                chirality,
+                readViewSide(hand) ?? undefined,
+              )[joint];
             }
           } catch {
             base.error = 'No se ha podido procesar la imagen.';

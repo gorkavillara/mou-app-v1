@@ -8,14 +8,14 @@ Para cada articulación medible, fijamos:
 1. La **posición de referencia** (cuándo es 0°).
 2. El **rango clínico esperado** (de 0° a X°).
 3. El **vector que se calcula** sobre los landmarks de MediaPipe.
-4. El **signo** (flexión + / extensión −), anclado a la **anatomía** vía handedness — no a la imagen (ver siguiente sección).
+4. El **signo** (flexión + / extensión −), anclado a la **anatomía** vía handedness **y lado de la mano que ve la cámara** — no a la imagen (ver siguiente sección).
 5. El **rango medido empíricamente** (lo que devuelve la cámara antes de normalizar).
 
 ## Convención de signo: anclada a la anatomía, no a la imagen (2026-09-09)
 
 > Ver decisión [[02-Decisiones-clave#D17]] y tarea [[13-Tablero|IA-18]].
 
-**El bug (grave, silencioso, ya corregido).** `calculateJointAngles` fija el signo flexión(+)/extensión(−) con el producto vectorial 2D `a.x·b.y − a.y·b.x`. Ese producto mide el **sentido de giro en el espacio de la imagen**, no en anatomía: se **invierte cuando la mano proyectada se refleja**, es decir cuando el paciente enseña el otro lado de la mano a la cámara o usa la otra mano.
+**El bug (grave, silencioso, ya corregido).** `calculateJointAngles` fija el signo flexión(+)/extensión(−) con el producto vectorial 2D `a.x·b.y − a.y·b.x`. Ese producto mide el **sentido de giro en el espacio de la imagen**, no en anatomía: se **invierte cuando la mano proyectada se refleja**, es decir cuando el paciente usa la otra mano, o enseña el otro canto de la mano a la cámara (este segundo caso **no lo cubría** el arreglo del 2026-09-09: ver «Segunda paridad» más abajo).
 
 **Evidencia experimental (Gorka, 2026-09-09).** Se cogieron las 15 fotos de goniómetro del cirujano, se **espejaron horizontalmente** y se volvió a pasar el mismo pipeline:
 - Se invirtió el signo de **las 15** lecturas, manteniendo las magnitudes. Ejemplos: índice MCP a 90° de goniómetro pasó de **−75,2° a +72,2°**; índice PIP a 90° pasó de **−71,3° a +76,6°**.
@@ -29,6 +29,19 @@ Para cada articulación medible, fijamos:
 - `calculateJointAngles(landmarks, finger, chirality?)` y `calculateAllJointAngles(landmarks, chirality?)`.
 
 En la sesión del paciente la quiralidad se usa **suavizada a nivel de sesión, no por frame**, precisamente porque la clasificación por frame falla de vez en cuando (el puño cerrado del experimento).
+
+### Segunda paridad: qué canto de la mano ve la cámara (2026-09-16, IA-23)
+
+**El síntoma.** Primera sesión de Javi en iPhone (cámara frontal, `mou-v1.vercel.app`): con el índice **recto marcaba 28°** y con el **MCP a 90° marcaba −30°**. El −30° es exactamente `clinicalMin`: la lectura cruda salió con el signo invertido y se recortó.
+
+**La causa.** La etiqueta de handedness sólo capta el **espejo**. Pero enseñar la **misma** mano por el canto del pulgar (vista **radial**) o por el del meñique (vista **ulnar**) es una **rotación de 180°**, no un espejo: MediaPipe la sigue etiquetando `Right`, y aun así el giro 2D de cada articulación se invierte. Las 15 fotos del goniómetro son todas **radiales** (mano derecha, pulgar hacia la cámara); Javi, sujetando el móvil con una mano frente a la cámara frontal, enseñó de forma natural el canto **ulnar**. Resultado: todo invertido.
+
+**El arreglo.** El signo pasa a ser `sign(cross2D) · parity(handedness) · parity(lado)`. El lado se lee de la **profundidad relativa** (`z`) de los nudillos: en un perfil, el MCP del índice (5) y el del meñique (17) quedan uno detrás del otro; si el del índice está más cerca → radial, si el del meñique → ulnar. `readViewSide()` exige que al menos el 50 % del eje 5→17 apunte en profundidad; si no, la mano no está de perfil y devuelve `null`.
+- **Evidencia**: en las 9 fotos de índice del goniómetro ese eje es casi pura profundidad (**+0,94 a +1,00**, todas radiales); en las 6 del pulgar, que no están de perfil, sale **−0,20 a +0,02** (ambiguo, `null`). Re-ejecutado `calibrate-from-photos.ts` con el arreglo: las 9 lecturas crudas del índice son **idénticas** al decimal, así que `JOINT_CALIBRATION` no cambia.
+- **Radial es el ancla** (lado en el que se calibró): `flexionSignFor(chirality, viewSide)` sólo invierte para `'ulnar'`.
+- En la sesión el lado **se sigue** (no se congela como la quiralidad), con histéresis de 8 frames seguidos (`updateViewSideTracker`): girar la mano es un cambio real que el paciente puede hacer, un nudillo mal estimado en un frame no. **Hasta ver la mano de perfil una vez no se mide**, igual que con la quiralidad.
+
+⚠️ **Pendiente de validar con fotos ulnares reales**: no hay ninguna foto de goniómetro tomada por el canto del meñique; la invariancia está probada con geometría sintética (tests) y con la reconstrucción de la sesión de Javi, no con datos medidos. Pedir a Javi el mismo set de 0/45/90° **por el lado del meñique**. Además, la captura de 2026-06-06 que se atribuyó a «quiralidad opuesta» pudo ser en realidad una vista ulnar — no cambia nada (sigue invalidada), pero la explicación era incompleta.
 
 ⚠️ **Consecuencia para la calibración antigua**: la captura de 2026-06-06 (MCP 12,3 / 98,8) se tomó en la **quiralidad opuesta**, por lo que su `measuredOpen` del MCP tenía el signo cambiado. **Queda invalidada** y ha sido sustituida (ver tabla).
 
