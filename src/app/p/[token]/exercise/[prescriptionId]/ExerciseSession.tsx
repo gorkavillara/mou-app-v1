@@ -14,6 +14,7 @@ import {
   readHandedness,
   readViewSide,
   summarizeHandednessSamples,
+  toImagePixels,
   updateRepCoaching,
   updateViewSideTracker,
   type FingerAngles,
@@ -545,6 +546,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   }, []);
 
   const processLandmarks = useCallback(
+    // `landmarks` in image-pixel units (see `toImagePixels`).
     (landmarks: Point[] | null) => {
       // Chirality + view-side warm-up gate. Until both are known we cannot
       // tell flexion from extension, and measuring with a possibly inverted
@@ -557,7 +559,13 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
       // state the moment the verdict lands (a few tenths of a second in).
       const chirality = sessionChiralityRef.current;
       const viewSide = viewSideTrackerRef.current.side;
-      if (chirality === null || viewSide === null) return;
+      if (chirality === null) return;
+      // The view side only exists for a hand in profile, which is how the long
+      // fingers are exercised. The thumb flexes across the palm and is filmed
+      // with the palm towards the camera (as in the goniometer photos), where
+      // there is no view side to wait for: it is measured on the radial anchor.
+      const needsProfile = driverFingerNames.some((name) => name !== 'pulgar');
+      if (needsProfile && viewSide === null) return;
 
       const rec = currentRepRef.current;
       rec.framesTotal += 1;
@@ -569,7 +577,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
       const allRaw: FingerJointAngles = calculateAllJointAngles(
         landmarks,
         chirality,
-        viewSide,
+        viewSide ?? undefined,
       );
 
       // FB-1: the fingers contributing to the rep driver + per-finger peaks are
@@ -595,7 +603,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
           const jn = jointFromTracked(joint);
           const rawValue =
             jn === 'MCP' ? raw.MCP : jn === 'PIP' ? raw.PIP : raw.DIP;
-          const value = normalizeJointAngle(rawValue, jn);
+          const value = normalizeJointAngle(rawValue, jn, f.name);
           jointValues[joint] = value;
 
           const slot = fingerSlot[joint] ?? { peakFlex: 0, peakExt: 0 };
@@ -774,10 +782,15 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     // handedness label only travels in the raw MediaPipe result, which is why
     // this lives here and not in `processLandmarks`.
     updateChiralityVerdict(result);
-    if (hand) {
+    // All joint geometry runs in image pixels: MediaPipe's normalised x and y
+    // are fractions of DIFFERENT lengths on a non-square (9:16) video.
+    const handPixels = hand
+      ? toImagePixels(hand, video.videoWidth || 1, video.videoHeight || 1)
+      : null;
+    if (handPixels) {
       viewSideTrackerRef.current = updateViewSideTracker(
         viewSideTrackerRef.current,
-        readViewSide(hand),
+        readViewSide(handPixels),
       );
     }
 
@@ -795,7 +808,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, rect.width, rect.height);
 
-    if (hand) {
+    if (hand && handPixels) {
       // FB-3 / IA-14: feed the REAL normalized MCP per finger so `drawHand`
       // paints the per-fingertip label for the injured fingers (it was hard-
       // coded to 0, so the labels showed nothing). One full map is required.
@@ -803,16 +816,16 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
       // |ángulo| (drawHand takes the absolute value), so the overlay keeps
       // showing sane numbers during the warm-up frames where it is still null.
       const rawAngles = calculateAllJointAngles(
-        hand,
+        handPixels,
         sessionChiralityRef.current ?? undefined,
         viewSideTrackerRef.current.side ?? undefined,
       );
       const fingerAngles: FingerAngles = {
-        pulgar: Math.round(normalizeJointAngle(rawAngles.pulgar.MCP, 'MCP')),
-        indice: Math.round(normalizeJointAngle(rawAngles.indice.MCP, 'MCP')),
-        medio: Math.round(normalizeJointAngle(rawAngles.medio.MCP, 'MCP')),
-        anular: Math.round(normalizeJointAngle(rawAngles.anular.MCP, 'MCP')),
-        menique: Math.round(normalizeJointAngle(rawAngles.menique.MCP, 'MCP')),
+        pulgar: Math.round(normalizeJointAngle(rawAngles.pulgar.MCP, 'MCP', 'pulgar')),
+        indice: Math.round(normalizeJointAngle(rawAngles.indice.MCP, 'MCP', 'indice')),
+        medio: Math.round(normalizeJointAngle(rawAngles.medio.MCP, 'MCP', 'medio')),
+        anular: Math.round(normalizeJointAngle(rawAngles.anular.MCP, 'MCP', 'anular')),
+        menique: Math.round(normalizeJointAngle(rawAngles.menique.MCP, 'MCP', 'menique')),
       };
       drawHand(
         ctx,
@@ -824,7 +837,7 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
         fingerStatus,
         fingerAngles,
       );
-      processLandmarks(hand);
+      processLandmarks(handPixels);
     } else {
       processLandmarks(null);
     }

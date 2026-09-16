@@ -731,7 +731,7 @@ export type JointAngles = {
   MCP: number;
   /** Proximal interphalangeal joint. 0° = straight, ~100° = full flexion. */
   PIP: number;
-  /** Distal interphalangeal joint (fingertip). 0° = straight, ~80° = full flexion. */
+  /** Distal interphalangeal joint (fingertip). 0° = straight, up to 90° measured flexion. */
   DIP: number;
 };
 
@@ -819,6 +819,8 @@ const VIEW_SIDE_MIN_DEPTH_RATIO = 0.5;
  * the camera). In a profile view the index and pinky knuckles sit one behind
  * the other: index MCP nearer → radial view; pinky MCP nearer → ulnar view.
  * Returns `null` when the hand is not in profile enough to tell.
+ *
+ * @param landmarks In image-pixel units — see `toImagePixels`.
  */
 export function readViewSide(landmarks: Point[]): HandViewSide | null {
   const indexMcp = landmarks[5];
@@ -835,14 +837,48 @@ export function readViewSide(landmarks: Point[]): HandViewSide | null {
 }
 
 /**
+ * Maps MediaPipe's normalised landmarks (x ∈ [0,1] of the image WIDTH, y ∈
+ * [0,1] of its HEIGHT, z on the width's scale) to image-pixel units.
+ *
+ * ASPECT BUG (2026-09-16). The joint geometry used to run on the normalised
+ * values directly. On a non-square image that stretches one axis against the
+ * other and bends every angle: the goniometer crops are 240×320, 330×256,
+ * 240×252… and a portrait phone video is 9:16, so the same real angle read
+ * differently per photo and per device. Every caller of `calculateJointAngles`
+ * and `readViewSide` must go through this first.
+ */
+export function toImagePixels(landmarks: Point[], width: number, height: number): Point[] {
+  return landmarks.map((p) => ({ x: p.x * width, y: p.y * height, z: p.z * width }));
+}
+
+/**
+ * Signed angle from segment a to segment b in the IMAGE plane, in degrees:
+ * 0 when collinear, sign = rotational sense (2D cross product).
+ */
+function signedImageAngle(ax: number, ay: number, bx: number, by: number): number {
+  return Math.atan2(ax * by - ay * bx, ax * bx + ay * by) * (180 / Math.PI);
+}
+
+/**
  * Computes MCP, PIP and DIP angles for a single finger.
  *
- * All three joints carry a SIGN via the same 2D cross-product convention:
- * positive = flexion, negative = extension/hyperextension.
+ * @param landmarks In image-pixel units — see `toImagePixels`.
+ *
+ * All three joints are measured IN THE IMAGE PLANE (x, y) between consecutive
+ * segments, and carry a sign: positive = flexion, negative = extension.
  *
  * - MCP: between wrist→MCP and MCP→PIP.
  * - PIP: between MCP→PIP and PIP→DIP.
  * - DIP: between PIP→DIP and DIP→TIP.
+ *
+ * WHY 2D (2026-09-16). Measured against the surgeon's 15 goniometer photos with
+ * no calibration at all, the image-plane angle was the closest of the four
+ * candidates (mean error 9.5°; MCP 0.4 / 46.3 / 81.1 for 0 / 45 / 90). Adding
+ * MediaPipe's z made it worse (11.0°), the normalised-3D version in use until
+ * then was worse still (14.2°), and the metric world landmarks were the worst
+ * (14.9°, up to 45° off): the z estimate of a hand in profile is noise for a
+ * flexion angle. The exercise is done with the hand in profile precisely so
+ * that the flexion plane IS the image plane.
  *
  * @param chirality MediaPipe handedness for this hand. PASS IT for any reading
  *   that will be normalized or persisted: without it the sign is whatever the
@@ -853,15 +889,11 @@ export function readViewSide(landmarks: Point[]): HandViewSide | null {
  *   Omitted = radial, the side the calibration was captured on.
  *
  * BUG-4 (surgeon feedback 2026-05-20: "NO MARCA LA EXTENSIÓN DE LAS
- * INTERFALÁNGICAS"): PIP and DIP previously returned magnitude only, so an
- * extension deficit / mild hyperextension at the interphalangeals — exactly
- * the clinical datum an extensor-tendon surgeon needs — collapsed to a
- * positive number and then got clamped to 0 in normalization. They now carry
- * the same flexion(+)/extension(−) sign as MCP so the negative region is
- * resolvable downstream.
+ * INTERFALÁNGICAS"): PIP and DIP carry the same flexion(+)/extension(−) sign as
+ * MCP so an extension deficit resolves as a negative value.
  *
  * Returned values are RAW measured degrees. Apply `normalizeJointAngle` to map
- * them to the clinical 0–90° (or 0–100/0–80) range.
+ * them to clinical degrees.
  */
 export function calculateJointAngles(
   landmarks: Point[],
@@ -876,30 +908,14 @@ export function calculateJointAngles(
   const tip = landmarks[finger.tipIndex];
 
   const sign = flexionSignFor(chirality, viewSide);
+  const joint = (from: Point, vertex: Point, to: Point) =>
+    signedImageAngle(vertex.x - from.x, vertex.y - from.y, to.x - vertex.x, to.y - vertex.y) * sign;
 
-  // MCP: wrist→MCP versus MCP→PIP. Preserve sign for hyperextension.
-  const a1x = mcp.x - wrist.x, a1y = mcp.y - wrist.y, a1z = mcp.z - wrist.z;
-  const b1x = pip.x - mcp.x,   b1y = pip.y - mcp.y,   b1z = pip.z - mcp.z;
-  const mcpMag = angleBetweenVectors(a1x, a1y, a1z, b1x, b1y, b1z);
-  const mcpCross2D = a1x * b1y - a1y * b1x;
-  const mcpAngle = (mcpCross2D >= 0 ? mcpMag : -mcpMag) * sign;
-
-  // PIP: MCP→PIP versus PIP→DIP. Signed (see BUG-4 above) so extension
-  // deficit / hyperextension resolves as a negative value.
-  const a2x = pip.x - mcp.x,   a2y = pip.y - mcp.y,   a2z = pip.z - mcp.z;
-  const b2x = dip.x - pip.x,   b2y = dip.y - pip.y,   b2z = dip.z - pip.z;
-  const pipMag = angleBetweenVectors(a2x, a2y, a2z, b2x, b2y, b2z);
-  const pipCross2D = a2x * b2y - a2y * b2x;
-  const pipAngle = (pipCross2D >= 0 ? pipMag : -pipMag) * sign;
-
-  // DIP: PIP→DIP versus DIP→TIP. Signed (see BUG-4 above).
-  const a3x = dip.x - pip.x,   a3y = dip.y - pip.y,   a3z = dip.z - pip.z;
-  const b3x = tip.x - dip.x,   b3y = tip.y - dip.y,   b3z = tip.z - dip.z;
-  const dipMag = angleBetweenVectors(a3x, a3y, a3z, b3x, b3y, b3z);
-  const dipCross2D = a3x * b3y - a3y * b3x;
-  const dipAngle = (dipCross2D >= 0 ? dipMag : -dipMag) * sign;
-
-  return { MCP: mcpAngle, PIP: pipAngle, DIP: dipAngle };
+  return {
+    MCP: joint(wrist, mcp, pip),
+    PIP: joint(mcp, pip, dip),
+    DIP: joint(pip, dip, tip),
+  };
 }
 
 export function calculateAllJointAngles(
@@ -980,110 +996,112 @@ export function calculateWristAngle(landmarks: Point[], forearmPoint?: Point): n
 }
 
 // --- Calibration & normalization (IA-03) ---
-// Maps raw measured degrees to the clinical 0–X° range.
+// Maps raw measured degrees to clinical degrees.
 //
-// 2026-06-06 — FIRST real empirical capture (Gorka, technical calibration via
-// webcam, hand in profile, `/dev/calibration` tool). These replace the prior
-// guessed placeholders for MCP/PIP/DIP. NOTE: this is a TECHNICAL calibration
-// (sanity check of the pipeline), NOT the clinical one — the surgeon's
-// goniometer validation is still pending (OPS-1) and may shift these numbers.
-// See docs/mou-dev/12-Convencion-angular.md.
+// 2026-09-16 — PIECEWISE-LINEAR TABLE THROUGH EVERY GONIOMETER POINT. Until
+// now each joint had a single straight line (`measuredOpen`/`measuredClosed`)
+// least-squares fitted through the photos, which by construction could not hit
+// them: the MCP was off by up to 14.9° on the very photos it was fitted on,
+// because MediaPipe's reading is not linear in the real angle (the proximal
+// phalanx foreshortens and the PIP/DIP keypoints sit off the real joint
+// centres). The table passes through each measured (raw, goniometer) pair and
+// interpolates linearly between them, so the surgeon's photos read back
+// exactly what his goniometer said. Outside the measured range the nearest
+// segment's slope is extended, then clamped to [clinicalMin, clinicalMax].
+//
+// Source for every `points` entry: docs/mou-dev/calibration/ (photos +
+// calibration-report.json), regenerated with
+//     npx tsx scripts/calibrate-from-photos.ts
+// src/test/calibration-goniometer.test.ts fails if a number here drifts from
+// the report or if any photo stops reading its goniometer value.
+//
+// ⚠️ Exact on its own photos is not the same as validated: three postures per
+// joint, one finger per group, one subject, WhatsApp-compressed crops. New
+// photos (other subjects, the ulnar side, hyperextension) should be ADDED as
+// points, not used to replace these.
+
+export type CalibrationPoint = {
+  /** Raw reading of `calculateJointAngles` on a goniometer-measured posture. */
+  raw: number;
+  /** What the goniometer said for that posture, in clinical degrees. */
+  clinical: number;
+};
 
 export type JointCalibration = {
-  measuredOpen: number;
-  measuredClosed: number;
+  /** At least two points, strictly increasing in both `raw` and `clinical`. */
+  points: CalibrationPoint[];
   clinicalMax: number;
   /** Negative bound for joints that hyperextend (wrist, MCP) or have an extension deficit (PIP/DIP). */
   clinicalMin?: number;
 };
 
 export const JOINT_CALIBRATION: Record<JointName, JointCalibration> = {
-  // wrist: NOT yet empirically calibrated — the capture tool has no forearm
-  // reference (see Task in CalibrationView; `calculateWristAngle` returns 0
-  // without one, so the 2026-06-06 capture came back 0/0 and was discarded).
-  // Placeholder until a capture or goniometer session provides real values.
-  wrist: { measuredOpen: 15, measuredClosed: 95,  clinicalMax: 90, clinicalMin: -70 },
+  // wrist: NOT empirically calibrated — the capture tool has no forearm
+  // reference (`calculateWristAngle` returns 0 without one). Placeholder: the
+  // old 15→0 / 95→90 line, as two points.
+  wrist: { points: [{ raw: 15, clinical: 0 }, { raw: 95, clinical: 90 }], clinicalMax: 90, clinicalMin: -70 },
 
-  // MCP/PIP/DIP — 2026-09-09 GONIOMETER-REFERENCED fit (OPS-1).
-  //
-  // Source: the surgeon's photo set (index finger held at 0° / 45° / 90° on each
-  // of MCP, PIP and DIP, each posture measured with a physical goniometer),
-  // stored in docs/mou-dev/calibration/. Reproduce with:
-  //     npx tsx scripts/calibrate-from-photos.ts
-  // The script runs the app's own MediaPipe pipeline over each photo, reads the
-  // angle through THIS file's `calculateJointAngles`, least-squares fits
-  // `clinical = m·raw + b` and inverts the line to get the pair below.
-  //
-  // This supersedes the 2026-06-06 capture (MCP 12.3/98.8, PIP −5.7/81.4,
-  // DIP −5.6/71.9), which averaged across the long fingers, had no goniometer
-  // reference, and — decisively — was taken at the opposite image chirality, so
-  // its MCP `measuredOpen` carried the wrong sign (see `flexionSignFor`).
-  //
-  // Fit quality against the goniometer (clinical degrees):
-  //   MCP  R² 0.909 · mean 10.0° · max 14.9°   ← marginal, see caveat
-  //   PIP  R² 0.976 · mean  5.3° · max  7.9°
-  //   DIP  R² 0.994 · mean  2.7° · max  4.1°
-  //
-  // ⚠️ CAVEAT: three points per joint, one finger, one subject (a single unaffected hand), from
-  // WhatsApp-compressed crops. PIP/DIP clear the vault's clinical gate (mean
-  // ≤10°, max ≤15°); MCP only just does — its 2D reading saturates above ~45°
-  // of flexion because the proximal phalanx foreshortens and the knuckle
-  // occludes in a closed fist. More MCP capture points are still owed (OPS-1).
-  MCP:   { measuredOpen: -11.8, measuredClosed: 88,   clinicalMax: 90,  clinicalMin: -30 },
-  // measuredOpen stays NEGATIVE on all three joints: with the finger held at a
-  // true 0° the detector reads a few degrees past straight. That is why
-  // normalization below uses one single slope through both calibration points.
-  // clinicalMin (BUG-4, surgeon feedback 2026-05-20): post-op EXTENSOR-TENDON
-  // patients sit near or below 0° (extension deficit / mild hyperextension);
-  // the −30° bound lets normalization RESOLVE that region instead of flattening
-  // it to 0 — the "NO MARCA LA EXTENSIÓN DE LAS INTERFALÁNGICAS" complaint. The
-  // bound itself is still unmeasured: the photo set has no hyperextension pose.
-  PIP:   { measuredOpen: -1.3,  measuredClosed: 76.8, clinicalMax: 100, clinicalMin: -30 },
-  DIP:   { measuredOpen: -8,    measuredClosed: 52.9, clinicalMax: 80,  clinicalMin: -30 },
+  // Long fingers — index photos 0°/45°/90° per joint (IA-24).
+  // clinicalMin −30° (BUG-4): extensor-tendon patients sit near or below 0°;
+  // still unmeasured, the photo set has no hyperextension pose.
+  // DIP clinicalMax raised 80° → 90°: the surgeon measured a 90° DIP with the
+  // goniometer, and an 80° ceiling clamped that photo to 80°.
+  MCP: { points: [{ raw: -0.43, clinical: 0 }, { raw: 46.32, clinical: 45 }, { raw: 81.09, clinical: 90 }], clinicalMax: 90, clinicalMin: -30 },
+  PIP: { points: [{ raw: 1.96, clinical: 0 }, { raw: 24.61, clinical: 45 }, { raw: 70.54, clinical: 90 }], clinicalMax: 100, clinicalMin: -30 },
+  DIP: { points: [{ raw: -3.74, clinical: 0 }, { raw: 20.68, clinical: 45 }, { raw: 63.46, clinical: 90 }], clinicalMax: 90, clinicalMin: -30 },
 };
 
 /**
- * Linearly maps a raw measured angle to the clinical range using the joint's
- * two-point calibration.
- *
- * 2026-06-06 — UNIFIED SLOPE. This replaced the previous two-branch formula
- * (a separate positive segment and a negative "hyperextension band" that
- * pivoted on `−measuredOpen` and divided by `measuredOpen`). The first real
- * capture exposed two problems the old code couldn't handle:
- *   1. `measuredOpen` can be NEGATIVE (PIP/DIP read −5.7/−5.6 when flat-open),
- *      so dividing by it and pivoting on `−measuredOpen` was nonsense.
- *   2. Raw inputs between `measuredOpen` and 0 fell into the negative branch and
- *      were mapped with the wrong slope instead of resolving smoothly toward 0.
- *
- * A two-point calibration mathematically defines exactly ONE line: the points
- * (measuredOpen → 0 clinical) and (measuredClosed → clinicalMax). We use that
- * single slope everywhere. Inputs below `measuredOpen` extend linearly into the
- * negative clinical band (down to `clinicalMin`, or 0 for joints with none);
- * inputs above `measuredClosed` clamp at `clinicalMax`.
- *
- *   clinical(x) = (x − measuredOpen) · clinicalMax / (measuredClosed − measuredOpen)
- *   clamped to [clinicalMin ?? 0, clinicalMax]
- *
- * Guard: if `measuredClosed − measuredOpen` is not a positive, finite range we
- * return 0 — this protects against degenerate captures (e.g. the wrist coming
- * back 0/0 because the calibration tool has no forearm reference) where the
- * slope would be NaN/Infinity.
+ * Thumb override. The thumb has two phalanges, so in `FINGERS` its `pipIndex`
+ * vertex (landmark 2) is the clinical MP and its `dipIndex` vertex (landmark 3)
+ * the clinical IP (see IA-20); its "MCP" is really the CMC and stays uncalibrated.
+ * Photos: MP 0°/45°/55°, IP 0°/45°/80° (the surgeon's own IP stops at 80°).
+ * clinicalMax 90° on both is the anatomical ceiling, not a measured one.
  */
-export function normalizeJointAngle(measuredDeg: number, joint: JointName): number {
-  const cal = JOINT_CALIBRATION[joint];
-  const range = cal.measuredClosed - cal.measuredOpen;
-  if (!Number.isFinite(range) || range <= 0) return 0;
+export const THUMB_CALIBRATION: Partial<Record<JointName, JointCalibration>> = {
+  PIP: { points: [{ raw: 4.91, clinical: 0 }, { raw: 41.95, clinical: 45 }, { raw: 63.2, clinical: 55 }], clinicalMax: 90, clinicalMin: -30 },
+  DIP: { points: [{ raw: -14.65, clinical: 0 }, { raw: 42.69, clinical: 45 }, { raw: 82.17, clinical: 80 }], clinicalMax: 90, clinicalMin: -30 },
+};
 
-  const clinical = ((measuredDeg - cal.measuredOpen) / range) * cal.clinicalMax;
+export function calibrationFor(joint: JointName, finger?: FingerName): JointCalibration {
+  return (finger === 'pulgar' ? THUMB_CALIBRATION[joint] : undefined) ?? JOINT_CALIBRATION[joint];
+}
+
+/**
+ * Maps a raw measured angle to clinical degrees through the joint's calibration
+ * table (see the section comment above): linear between neighbouring points,
+ * the end segments' slope beyond them, clamped to [clinicalMin ?? 0, clinicalMax].
+ *
+ * Guard: a table with fewer than two points or a non-increasing segment
+ * returns 0 rather than NaN/Infinity (degenerate capture).
+ */
+export function normalizeJointAngle(
+  measuredDeg: number,
+  joint: JointName,
+  finger?: FingerName,
+): number {
+  const cal = calibrationFor(joint, finger);
+  const pts = cal.points;
+  if (pts.length < 2) return 0;
+  for (let i = 1; i < pts.length; i++) {
+    if (!(pts[i].raw > pts[i - 1].raw)) return 0;
+  }
+
+  let seg = 1;
+  while (seg < pts.length - 1 && measuredDeg > pts[seg].raw) seg++;
+  const a = pts[seg - 1];
+  const b = pts[seg];
+  const clinical = a.clinical + ((measuredDeg - a.raw) * (b.clinical - a.clinical)) / (b.raw - a.raw);
+
   const lowerBound = cal.clinicalMin ?? 0;
   return Math.max(lowerBound, Math.min(cal.clinicalMax, clinical));
 }
 
-export function normalizeFingerJointAngles(raw: JointAngles): JointAngles {
+export function normalizeFingerJointAngles(raw: JointAngles, finger?: FingerName): JointAngles {
   return {
-    MCP: normalizeJointAngle(raw.MCP, 'MCP'),
-    PIP: normalizeJointAngle(raw.PIP, 'PIP'),
-    DIP: normalizeJointAngle(raw.DIP, 'DIP'),
+    MCP: normalizeJointAngle(raw.MCP, 'MCP', finger),
+    PIP: normalizeJointAngle(raw.PIP, 'PIP', finger),
+    DIP: normalizeJointAngle(raw.DIP, 'DIP', finger),
   };
 }
 

@@ -1,22 +1,24 @@
 /**
- * Goniometer-referenced calibration from photos (OPS-1 / IA-17).
+ * Goniometer-referenced calibration from photos (OPS-1 / IA-17 / IA-24).
  *
  * Takes the photo set in `docs/mou-dev/calibration/photos.json` — each photo is
  * one hand posture whose TRUE clinical angle was measured with a physical
- * goniometer — runs the app's own MediaPipe pipeline over it in IMAGE mode, and
- * fits `clinical = m · raw + b` per joint by least squares. From that line it
- * derives the `measuredOpen` / `measuredClosed` pair that `JOINT_CALIBRATION`
- * needs:
+ * goniometer — runs the app's own MediaPipe pipeline over it in IMAGE mode and:
  *
- *   measuredOpen   = raw reading that maps to   0° clinical  = (0 − b) / m
- *   measuredClosed = raw reading that maps to max° clinical  = (max − b) / m
+ *  1. builds, per (finger group × joint), the piecewise-linear table that
+ *     `JOINT_CALIBRATION` (long fingers) and `THUMB_CALIBRATION` need: one
+ *     `{ raw, clinical }` point per goniometer posture (raw averaged when a
+ *     posture has several photos);
+ *  2. reads EVERY photo back through `normalizeJointAngle` with the calibration
+ *     currently in the code and prints the error against the goniometer.
  *
- * Geometry comes from `calculateJointAngles` in src/lib/hand-tracking.ts — the
- * SAME function the exercise session uses — so the fit cannot drift from what
- * the product measures.
+ * Geometry comes from `toImagePixels` + `calculateJointAngles` in
+ * src/lib/hand-tracking.ts — the SAME functions the exercise session uses — so
+ * the table cannot drift from what the product measures.
  *
  * Usage:
  *   npx tsx scripts/calibrate-from-photos.ts
+ *   npx tsx scripts/calibrate-from-photos.ts --check      # exit 1 si alguna foto se desvía > 0,5°
  *   npx tsx scripts/calibrate-from-photos.ts --json out.json
  *   npx tsx scripts/calibrate-from-photos.ts --overlays   # evidencia visual
  *   npx tsx scripts/calibrate-from-photos.ts --dir <otro set de fotos>
@@ -35,10 +37,11 @@ import { chromium } from '@playwright/test';
 
 import {
   FINGERS,
-  JOINT_CALIBRATION,
   calculateJointAngles,
   normalizeJointAngle,
   readViewSide,
+  toImagePixels,
+  type CalibrationPoint,
   type FingerConfig,
   type FingerName,
   type HandChirality,
@@ -49,6 +52,9 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
 const PORT = 4321;
+
+/** `--check` tolerance: the table is exact by construction, so only rounding. */
+const CHECK_TOLERANCE_DEG = 0.5;
 
 /** `--dir <path>` points the run at another photo set (same layout). */
 function flag(name: string): string | undefined {
@@ -90,40 +96,43 @@ type Detection = {
   imageH: number;
 };
 
+type Sample = PhotoSpec & {
+  libJoint: JointName;
+  attempt: string | null;
+  raw: number | null;
+  handedness: string | null;
+  viewSide: string | null;
+  landmarks: Point[] | null;
+};
+
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
   '.json': 'application/json',
 };
 
-/** Least-squares fit of y = m·x + b, plus R² and residual stats. */
-function fitLine(points: Array<{ x: number; y: number }>) {
-  const n = points.length;
-  const meanX = points.reduce((s, p) => s + p.x, 0) / n;
-  const meanY = points.reduce((s, p) => s + p.y, 0) / n;
-  const sxx = points.reduce((s, p) => s + (p.x - meanX) ** 2, 0);
-  const sxy = points.reduce((s, p) => s + (p.x - meanX) * (p.y - meanY), 0);
-  const m = sxy / sxx;
-  const b = meanY - m * meanX;
-  const ssTot = points.reduce((s, p) => s + (p.y - meanY) ** 2, 0);
-  const residuals = points.map((p) => p.y - (m * p.x + b));
-  const ssRes = residuals.reduce((s, r) => s + r * r, 0);
-  const r2 = ssTot === 0 ? 1 : 1 - ssRes / ssTot;
-  const absRes = residuals.map(Math.abs);
-  return {
-    m,
-    b,
-    r2,
-    residuals,
-    meanAbsError: absRes.reduce((s, r) => s + r, 0) / n,
-    maxAbsError: Math.max(...absRes),
-  };
-}
-
 const round = (v: number, d = 1) => Number(v.toFixed(d));
 
-async function main() {
+const GROUPS = [
+  { label: 'JOINT_CALIBRATION (dedos largos)', key: 'long', match: (s: Sample) => s.finger !== 'pulgar' },
+  { label: 'THUMB_CALIBRATION', key: 'pulgar', match: (s: Sample) => s.finger === 'pulgar' },
+];
+
+/** One point per goniometer posture, raw averaged across its photos. */
+function buildTable(samples: Sample[]): CalibrationPoint[] {
+  const byClinical = new Map<number, number[]>();
+  for (const s of samples) {
+    if (s.raw === null) continue;
+    byClinical.set(s.clinical, [...(byClinical.get(s.clinical) ?? []), s.raw]);
+  }
+  return [...byClinical.entries()]
+    .map(([clinical, raws]) => ({ raw: round(raws.reduce((a, b) => a + b, 0) / raws.length, 2), clinical }))
+    .sort((a, b) => a.clinical - b.clinical);
+}
+
+async function main(): Promise<number> {
   const spec = JSON.parse(await readFile(join(PHOTO_DIR, 'photos.json'), 'utf8')) as {
     source: string;
     photos: PhotoSpec[];
@@ -160,14 +169,6 @@ async function main() {
   console.log(`MediaPipe listo · ${spec.photos.length} fotos · fuente: ${spec.source}\n`);
 
   // --- detect + measure ---
-  type Sample = PhotoSpec & {
-    libJoint: JointName;
-    attempt: string | null;
-    raw: number | null;
-    handedness: string | null;
-    landmarks: Point[] | null;
-  };
-
   const samples: Sample[] = [];
   for (const photo of spec.photos) {
     const det = (await page.evaluate(
@@ -181,13 +182,14 @@ async function main() {
         : (photo.joint as JointName);
 
     const fingerConfig = FINGERS.find((f) => f.name === photo.finger)!;
-    // Pass the detected chirality and view side: without them the sign of every
-    // reading is a function of how the hand was presented to the lens, not of
-    // anatomy.
+    // Geometry in image pixels (aspect-true), signed with the detected
+    // chirality and view side: without them the sign is a function of how the
+    // hand was presented to the lens, not of anatomy.
     const chirality = det.handedness?.categoryName as HandChirality | undefined;
-    const viewSide = det.landmarks ? readViewSide(det.landmarks) : null;
-    const raw = det.landmarks
-      ? calculateJointAngles(det.landmarks, fingerConfig, chirality, viewSide ?? undefined)[
+    const pixels = det.landmarks ? toImagePixels(det.landmarks, det.imageW, det.imageH) : null;
+    const viewSide = pixels ? readViewSide(pixels) : null;
+    const raw = pixels
+      ? calculateJointAngles(pixels, fingerConfig, chirality, viewSide ?? undefined)[
           libJoint as 'MCP' | 'PIP' | 'DIP'
         ]
       : null;
@@ -198,11 +200,12 @@ async function main() {
       attempt: det.attempt,
       raw,
       handedness: det.handedness?.categoryName ?? null,
+      viewSide,
       landmarks: det.landmarks,
     });
 
     console.log(
-      `  ${photo.file.padEnd(20)} ${String(photo.clinical).padStart(3)}° goniómetro → ` +
+      `  ${photo.file.padEnd(22)} ${String(photo.clinical).padStart(3)}° goniómetro → ` +
         (raw === null
           ? 'SIN MANO DETECTADA'
           : `${round(raw).toString().padStart(7)}° crudo (${det.attempt}, ${chirality ?? '?'}, ${viewSide ?? 'sin perfil'})`),
@@ -224,8 +227,8 @@ async function main() {
         `${s.caption}  ·  dedo ${s.finger}, ${s.joint}`,
         s.raw === null
           ? 'sin detección'
-          : `goniómetro ${s.clinical}°  ·  crudo ${round(s.raw)}°  ·  normalizado ${round(
-              normalizeJointAngle(s.raw, s.libJoint),
+          : `goniómetro ${s.clinical}°  ·  crudo ${round(s.raw)}°  ·  motor ${round(
+              normalizeJointAngle(s.raw, s.libJoint, s.finger),
             )}°`,
       ];
       const dataUrl = (await page.evaluate(
@@ -245,81 +248,64 @@ async function main() {
   await browser.close();
   server.close();
 
-  // --- fit per joint, long fingers only (the thumb is a different kinematic
-  //     chain and is out of scope for Fase 1; it is reported, not fitted in) ---
-  const report: Record<string, unknown> = { source: spec.source, generatedAt: new Date().toISOString() };
-  const fits: Record<string, ReturnType<typeof fitLine> & {
-    measuredOpen: number;
-    measuredClosed: number;
-    clinicalMax: number;
-    n: number;
-  }> = {};
+  // --- calibration tables from this photo set ---
+  const tables: Record<string, Partial<Record<JointName, CalibrationPoint[]>>> = {};
+  for (const g of GROUPS) {
+    const lines: string[] = [];
+    for (const joint of ['MCP', 'PIP', 'DIP'] as const) {
+      const points = buildTable(samples.filter((s) => g.match(s) && s.libJoint === joint));
+      if (points.length === 0) continue;
+      (tables[g.key] ??= {})[joint] = points;
+      const monotonic = points.every((p, i) => i === 0 || p.raw > points[i - 1].raw);
+      const literal = points.map((p) => `{ raw: ${p.raw}, clinical: ${p.clinical} }`).join(', ');
+      lines.push(`  ${joint}: [${literal}]${monotonic ? '' : '   ⚠️ NO MONÓTONA: no utilizable'}`);
+    }
+    if (lines.length) console.log(`\n--- puntos para ${g.label} ---\n${lines.join('\n')}`);
+  }
 
-  for (const joint of ['MCP', 'PIP', 'DIP'] as const) {
-    const points = samples.filter(
-      (s) => s.finger !== 'pulgar' && s.libJoint === joint && s.raw !== null,
-    );
-    if (points.length < 2) {
-      console.log(`\n${joint}: sólo ${points.length} punto(s) válido(s) — no se puede ajustar.`);
+  // --- every photo read back through the calibration IN THE CODE ---
+  console.log('\n--- lectura del motor con la calibración actual ---');
+  let worst = 0;
+  for (const s of samples) {
+    if (s.raw === null) {
+      console.log(`  ${s.file.padEnd(22)} SIN MANO`);
+      worst = Infinity;
       continue;
     }
-    const fit = fitLine(points.map((p) => ({ x: p.raw!, y: p.clinical })));
-    const clinicalMax = JOINT_CALIBRATION[joint].clinicalMax;
-    const measuredOpen = (0 - fit.b) / fit.m;
-    const measuredClosed = (clinicalMax - fit.b) / fit.m;
-    fits[joint] = { ...fit, measuredOpen, measuredClosed, clinicalMax, n: points.length };
-
-    console.log(`\n${joint} · ${points.length} puntos (${points.map((p) => p.finger).join(', ')})`);
-    console.log(`  recta:  clínico = ${round(fit.m, 4)} · crudo ${fit.b >= 0 ? '+' : '−'} ${round(Math.abs(fit.b), 2)}`);
-    console.log(`  R² = ${round(fit.r2, 4)} · error medio ${round(fit.meanAbsError)}° · máx ${round(fit.maxAbsError)}°`);
-    console.log(`  measuredOpen = ${round(measuredOpen)}  measuredClosed = ${round(measuredClosed)}  (clinicalMax ${clinicalMax}°)`);
-    points.forEach((p, i) => {
-      console.log(
-        `    ${p.file.padEnd(20)} crudo ${round(p.raw!).toString().padStart(7)}° → ` +
-          `predicho ${round(fit.m * p.raw! + fit.b).toString().padStart(6)}° · real ${p.clinical}° · residuo ${round(fit.residuals[i])}°`,
-      );
-    });
-  }
-
-  console.log('\n--- bloque para JOINT_CALIBRATION ---');
-  for (const [joint, f] of Object.entries(fits)) {
-    const min = JOINT_CALIBRATION[joint as JointName].clinicalMin;
+    const engine = normalizeJointAngle(s.raw, s.libJoint, s.finger);
+    const error = engine - s.clinical;
+    worst = Math.max(worst, Math.abs(error));
     console.log(
-      `  ${joint.padEnd(6)}{ measuredOpen: ${round(f.measuredOpen)}, measuredClosed: ${round(f.measuredClosed)}, ` +
-        `clinicalMax: ${f.clinicalMax}${min !== undefined ? `, clinicalMin: ${min}` : ''} },`,
+      `  ${s.file.padEnd(22)} goniómetro ${String(s.clinical).padStart(3)}° → motor ${round(engine)
+        .toString()
+        .padStart(6)}°   error ${error >= 0 ? '+' : ''}${round(error)}°`,
     );
   }
+  console.log(`  peor error: ${round(worst)}°`);
 
-  const thumb = samples.filter((s) => s.finger === 'pulgar');
-  if (thumb.length) {
-    console.log('\n--- pulgar (informativo, fuera de alcance Fase 1) ---');
-    for (const t of thumb) {
-      console.log(
-        `  ${t.file.padEnd(20)} ${t.joint} (lib: ${t.libJoint}) ${String(t.clinical).padStart(3)}° → ` +
-          (t.raw === null ? 'SIN MANO' : `${round(t.raw)}° crudo`),
-      );
-    }
-  }
-
-  report.samples = samples.map(({ landmarks, ...rest }) => ({ ...rest, hasLandmarks: !!landmarks }));
-  report.fits = fits;
-  report.landmarks = Object.fromEntries(samples.map((s) => [s.file, s.landmarks]));
-
-  const jsonFlag = process.argv.indexOf('--json');
-  const outPath =
-    jsonFlag !== -1 && process.argv[jsonFlag + 1]
-      ? resolve(process.argv[jsonFlag + 1])
-      : join(PHOTO_DIR, 'calibration-report.json');
+  const report = {
+    source: spec.source,
+    generatedAt: new Date().toISOString(),
+    tables,
+    samples: samples.map(({ landmarks, ...rest }) => ({ ...rest, hasLandmarks: !!landmarks })),
+    landmarks: Object.fromEntries(samples.map((s) => [s.file, s.landmarks])),
+  };
+  const jsonFlag = flag('--json');
+  const outPath = jsonFlag ? resolve(jsonFlag) : join(PHOTO_DIR, 'calibration-report.json');
   await writeFile(outPath, JSON.stringify(report, null, 2));
   console.log(`\nInforme escrito en ${outPath}`);
 
-  const missing = samples.filter((s) => s.raw === null);
-  if (missing.length) {
-    console.log(`\n⚠️  ${missing.length} foto(s) sin detección: ${missing.map((m) => m.file).join(', ')}`);
-  }
+  return worst;
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+main()
+  .then((worst) => {
+    if (process.argv.includes('--check') && worst > CHECK_TOLERANCE_DEG) {
+      console.error(`\n✖ --check: alguna foto se desvía ${round(worst)}° (> ${CHECK_TOLERANCE_DEG}°)`);
+      process.exit(1);
+    }
+  })
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });

@@ -103,7 +103,46 @@ El pulgar tiene cinemática distinta (oposición, abducción, MP+IP solo). Lo de
 >
 > El pulgar está **fuera de alcance de Fase 1** y **no entra en el ajuste** de calibración (sus lecturas del set de fotos se reportan sólo como informativas). Si en Fase 2 se mete el pulgar, hay que **renombrar o mapear explícitamente** esas articulaciones antes de enseñar ningún número al cirujano.
 
+## Motor 2026-09-16: geometría 2D en píxeles + calibración por tabla (IA-24)
+
+> Sustituye la geometría y la calibración lineal de la sección siguiente (que se conserva como historial).
+
+**Petición**: que el motor dé **exactamente** el valor del goniómetro en todas las imágenes que ha pasado el cirujano. Con el motor anterior no lo hacía: hasta **15° de error en el MCP sobre las mismas fotos con las que se había calibrado**.
+
+**1. Bug de proporción (aspect ratio).** Los ángulos se calculaban sobre los landmarks **normalizados** de MediaPipe: `x` es fracción del **ancho** y `y` del **alto**. En una imagen no cuadrada eso estira un eje contra el otro y **dobla todos los ángulos**, distinto en cada foto (240×320, 330×256, 240×252…) y en el móvil (vídeo vertical 9:16). Ahora todo pasa antes por `toImagePixels(landmarks, ancho, alto)`.
+
+**2. Qué geometría.** Se compararon 4 formas de medir contra el goniómetro, **sin calibrar**, sobre las 15 fotos:
+
+| Método | Error medio | Error máx |
+|---|---|---|
+| Normalizado 3D (el que había) | 14,2° | 28,2° |
+| **Píxeles 2D (plano de imagen)** | **9,5°** | 26,5° |
+| Píxeles 3D (con z de MediaPipe) | 11,0° | 28,0° |
+| Landmarks métricos 3D (`worldLandmarks`) | 14,9° | 44,9° |
+
+Gana el **2D en píxeles**: el ejercicio se hace de perfil precisamente para que el plano de flexión sea el plano de la imagen, y la z de una mano de perfil es ruido. En crudo el MCP ya sale 0,4 / 46,3 / 81,1 para 0 / 45 / 90. PIP y DIP salen **bajos de forma sistemática** (los keypoints de MediaPipe no caen en el centro real de la articulación) — eso es trabajo de la calibración.
+
+**3. Calibración por tabla.** En vez de una recta por articulación (`measuredOpen`/`measuredClosed`), una **tabla lineal a tramos que pasa por cada par (crudo, goniómetro)**; fuera del rango medido se prolonga la pendiente del tramo extremo y se recorta a `[clinicalMin, clinicalMax]`. El **pulgar** tiene su tabla propia (`THUMB_CALIBRATION`: su `PIP` es la MP clínica y su `DIP` la IP). `normalizeJointAngle(crudo, articulación, dedo)`.
+
+| Tabla | 0° | 45° | 90° (55° / 80° pulgar) |
+|---|---|---|---|
+| MCP | −0,43 | 46,32 | 81,09 |
+| PIP | 1,96 | 24,61 | 70,54 |
+| DIP | −3,74 | 20,68 | 63,46 |
+| Pulgar MP | 4,91 | 41,95 | 63,20 (55°) |
+| Pulgar IP | −14,65 | 42,69 | 82,17 (80°) |
+
+**DIP `clinicalMax` 80° → 90°**: el cirujano midió un DIP a 90° con goniómetro; con tope 80° esa foto se recortaba a 80°.
+
+**Resultado**: las **15 fotos leen exactamente su valor de goniómetro (error 0°)**. Lo verifican `npx tsx scripts/calibrate-from-photos.ts --check` (sale con error si alguna se desvía > 0,5°; deja overlays en `calibration/overlays/`) y `src/test/calibration-goniometer.test.ts`, que además recalcula cada lectura cruda desde los landmarks guardados y exige que las tablas del código sean las del informe.
+
+**Validación independiente (no usada para calibrar)** — la sesión en vivo de Javi en iPhone (2026-09-14), con los landmarks que la propia app dibujó en pantalla: dedo **recto → −3°** (antes +28°) y **MCP a 90° → 90°** (antes −30°; en crudo 85,3°, la tabla lo lleva a 90°). No hay goniómetro en esas capturas («0° y unos 90°» a ojo) y el centro de cada punto se ajusta con ~1–2 px de error.
+
+⚠️ **Exacto en sus propias fotos no es lo mismo que validado.** Por construcción la tabla pasa por esos puntos: lo que demuestra es que el motor ya no deforma, no que acierte en manos nuevas. Sigue siendo **1 sujeto, 1 dedo largo, 3 posturas por articulación, fotos de WhatsApp**. Las fotos nuevas (otros sujetos, vista ulnar, hiperextensión, posiciones intermedias) se **añaden como puntos**, no sustituyen a estas. Pendiente en [[13-Tablero|IA-21]].
+
 ## Calibración goniométrica 2026-09-09 (cierra OPS-1 parcialmente)
+
+> ⛔ **Superada el 2026-09-16** por la sección anterior (IA-24): la recta y los `measuredOpen/measuredClosed` de aquí ya no existen en el código.
 
 El cirujano mandó por WhatsApp un set de **15 fotos** con el ángulo real medido con **goniómetro físico**: índice (2º dedo) **MCP / PIP / DIP a 0° / 45° / 90°** cada una, y pulgar **MP a 0/45/55** e **IP a 0/45/80**. Están commiteadas en:
 - `docs/mou-dev/calibration/photos/` — las fotos,
@@ -132,6 +171,8 @@ Sustituyen a los anteriores (**MCP 12,3 / 98,8 · PIP −5,7 / 81,4 · DIP −5,
 - El **pulgar no entra en el ajuste**: sus lecturas son informativas y su nomenclatura en el lib no es la clínica (ver nota del pulgar más arriba).
 
 ## Tabla rápida de calibración
+
+> ⛔ Columnas de calibración **superadas el 2026-09-16** (IA-24): los valores vigentes son las tablas de la sección «Motor 2026-09-16». DIP ya no tiene tope 80° sino 90°.
 
 | Articulación | 0° clínico | Tope clínico | Medido empírico (abierto / cerrado) | Calidad del ajuste | Hiperext. |
 |---|---|---|---|---|---|

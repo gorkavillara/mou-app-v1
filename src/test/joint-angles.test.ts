@@ -10,7 +10,9 @@ import {
   updateViewSideTracker,
   normalizeFingerJointAngles,
   JOINT_CALIBRATION,
+  THUMB_CALIBRATION,
   FINGERS,
+  type JointName,
   type Point,
 } from '@/lib/hand-tracking';
 
@@ -108,80 +110,61 @@ describe('calculateWristAngle', () => {
 });
 
 describe('normalizeJointAngle', () => {
-  it('maps measuredOpen to 0', () => {
-    for (const j of ['wrist', 'MCP', 'PIP', 'DIP'] as const) {
-      const cal = JOINT_CALIBRATION[j];
-      expect(normalizeJointAngle(cal.measuredOpen, j)).toBeCloseTo(0, 5);
+  const JOINTS = ['wrist', 'MCP', 'PIP', 'DIP'] as const;
+
+  it('passes through every calibration point exactly', () => {
+    for (const j of JOINTS) {
+      for (const p of JOINT_CALIBRATION[j].points) {
+        expect(normalizeJointAngle(p.raw, j)).toBeCloseTo(p.clinical, 5);
+      }
+    }
+    for (const [j, cal] of Object.entries(THUMB_CALIBRATION)) {
+      for (const p of cal!.points) {
+        expect(normalizeJointAngle(p.raw, j as JointName, 'pulgar')).toBeCloseTo(p.clinical, 5);
+      }
     }
   });
 
-  it('maps measuredClosed to clinicalMax', () => {
-    for (const j of ['wrist', 'MCP', 'PIP', 'DIP'] as const) {
-      const cal = JOINT_CALIBRATION[j];
-      expect(normalizeJointAngle(cal.measuredClosed, j)).toBeCloseTo(cal.clinicalMax, 5);
-    }
+  it('interpolates linearly between neighbouring points', () => {
+    const [a, b] = JOINT_CALIBRATION.MCP.points;
+    const mid = normalizeJointAngle((a.raw + b.raw) / 2, 'MCP');
+    expect(mid).toBeCloseTo((a.clinical + b.clinical) / 2, 5);
   });
 
-  it('clamps values above measuredClosed to clinicalMax', () => {
+  it('uses the thumb table only for the thumb', () => {
+    const raw = THUMB_CALIBRATION.PIP!.points[1].raw;
+    expect(normalizeJointAngle(raw, 'PIP', 'pulgar')).toBeCloseTo(THUMB_CALIBRATION.PIP!.points[1].clinical, 5);
+    expect(normalizeJointAngle(raw, 'PIP', 'indice')).toBeCloseTo(normalizeJointAngle(raw, 'PIP'), 5);
+    // The thumb "MCP" (really the CMC) has no table of its own.
+    expect(normalizeJointAngle(30, 'MCP', 'pulgar')).toBeCloseTo(normalizeJointAngle(30, 'MCP'), 5);
+  });
+
+  it('clamps values beyond the last point to clinicalMax', () => {
     expect(normalizeJointAngle(200, 'MCP')).toBeCloseTo(JOINT_CALIBRATION.MCP.clinicalMax, 5);
   });
 
-  // 2026-06-06: under the unified slope, an input BELOW measuredOpen no longer
-  // flattens to 0 — it extends linearly into the negative clinical band (down
-  // to clinicalMin). Asserted relative to measuredOpen rather than a literal:
-  // the 2026-09-09 goniometer fit moved MCP measuredOpen from +12.3 to −11.8,
-  // and the old literal (raw 0) silently stopped being a sub-open input.
-  it('maps a sub-measuredOpen MCP input below 0, not flattened to 0', () => {
-    const r = normalizeJointAngle(JOINT_CALIBRATION.MCP.measuredOpen - 5, 'MCP');
-    expect(r).toBeLessThan(0);
-    expect(r).toBeGreaterThanOrEqual(JOINT_CALIBRATION.MCP.clinicalMin!);
-  });
-
-  // 2026-06-06: unified-slope rewrite. The old BUG-4 tests asserted the
-  // asymmetric negative-band pivot (normalize(-measuredOpen) ≈ clinicalMin).
-  // That math is gone — a two-point calibration has exactly one slope. The
-  // INTENT is preserved: a raw input MORE extended than the open pose must
-  // resolve into the NEGATIVE clinical band (not flatten to 0), clamped at
-  // clinicalMin. We assert that on the new unified formula + real values.
-  it('maps measuredOpen to exactly 0 for every joint (new values)', () => {
-    for (const j of ['wrist', 'MCP', 'PIP', 'DIP'] as const) {
-      expect(normalizeJointAngle(JOINT_CALIBRATION[j].measuredOpen, j)).toBeCloseTo(0, 5);
-    }
-  });
-
-  it('maps measuredClosed to clinicalMax for every joint (new values)', () => {
-    for (const j of ['wrist', 'MCP', 'PIP', 'DIP'] as const) {
+  // BUG-4 intent: a raw input MORE extended than the 0° posture must resolve
+  // into the NEGATIVE clinical band (not flatten to 0), clamped at clinicalMin.
+  it('extends below the 0° point into the negative band, clamped at clinicalMin', () => {
+    for (const j of ['MCP', 'PIP', 'DIP'] as const) {
       const cal = JOINT_CALIBRATION[j];
-      expect(normalizeJointAngle(cal.measuredClosed, j)).toBeCloseTo(cal.clinicalMax, 5);
+      const zero = cal.points[0].raw;
+      const mild = normalizeJointAngle(zero - 5, j);
+      expect(mild).toBeLessThan(0);
+      expect(mild).toBeGreaterThan(cal.clinicalMin!);
+      expect(normalizeJointAngle(zero - 200, j)).toBeCloseTo(cal.clinicalMin!, 5);
     }
   });
 
-  it('resolves negative PIP/DIP input into the negative clinical band, not 0', () => {
-    // PIP measuredOpen is itself negative (−5.7). An input still MORE extended
-    // than the open pose must land below 0 in clinical degrees.
-    const pip = normalizeJointAngle(JOINT_CALIBRATION.PIP.measuredOpen - 5, 'PIP');
-    const dip = normalizeJointAngle(JOINT_CALIBRATION.DIP.measuredOpen - 5, 'DIP');
-    expect(pip).toBeLessThan(0);
-    expect(pip).toBeGreaterThanOrEqual(JOINT_CALIBRATION.PIP.clinicalMin!);
-    expect(dip).toBeLessThan(0);
-    expect(dip).toBeGreaterThanOrEqual(JOINT_CALIBRATION.DIP.clinicalMin!);
-  });
-
-  it('a PIP input more extended than the open pose maps negative; a far one clamps at clinicalMin', () => {
-    // −20 is more extended than measuredOpen (−5.7) but the linear map only
-    // reaches ~−16°, still inside the band.
-    const mild = normalizeJointAngle(-20, 'PIP');
-    expect(mild).toBeLessThan(0);
-    expect(mild).toBeGreaterThan(JOINT_CALIBRATION.PIP.clinicalMin!);
-    // −40 maps past −30 linearly, so the lower clamp must hold it at clinicalMin.
-    expect(normalizeJointAngle(-40, 'PIP')).toBeCloseTo(JOINT_CALIBRATION.PIP.clinicalMin!, 5);
-  });
-
-  it('returns 0 for a degenerate calibration (open === closed) instead of NaN/Infinity', () => {
+  it('returns 0 for a degenerate calibration instead of NaN/Infinity', () => {
     // The wrist 0/0 capture is the real-world trigger; simulate the degenerate
-    // range directly so the guard is exercised regardless of the live config.
-    const original = { ...JOINT_CALIBRATION.wrist };
-    JOINT_CALIBRATION.wrist = { measuredOpen: 0, measuredClosed: 0, clinicalMax: 90, clinicalMin: -70 };
+    // table directly so the guard is exercised regardless of the live config.
+    const original = JOINT_CALIBRATION.wrist;
+    JOINT_CALIBRATION.wrist = {
+      points: [{ raw: 0, clinical: 0 }, { raw: 0, clinical: 90 }],
+      clinicalMax: 90,
+      clinicalMin: -70,
+    };
     try {
       const r = normalizeJointAngle(45, 'wrist');
       expect(Number.isFinite(r)).toBe(true);
@@ -413,14 +396,10 @@ describe('updateViewSideTracker', () => {
 
 describe('normalizeFingerJointAngles', () => {
   it('passes each joint through its own calibration', () => {
-    const raw = {
-      MCP: JOINT_CALIBRATION.MCP.measuredClosed,
-      PIP: JOINT_CALIBRATION.PIP.measuredClosed,
-      DIP: JOINT_CALIBRATION.DIP.measuredClosed,
-    };
-    const n = normalizeFingerJointAngles(raw);
-    expect(n.MCP).toBeCloseTo(JOINT_CALIBRATION.MCP.clinicalMax, 5);
-    expect(n.PIP).toBeCloseTo(JOINT_CALIBRATION.PIP.clinicalMax, 5);
-    expect(n.DIP).toBeCloseTo(JOINT_CALIBRATION.DIP.clinicalMax, 5);
+    const last = (j: 'MCP' | 'PIP' | 'DIP') => JOINT_CALIBRATION[j].points.at(-1)!;
+    const n = normalizeFingerJointAngles({ MCP: last('MCP').raw, PIP: last('PIP').raw, DIP: last('DIP').raw });
+    expect(n.MCP).toBeCloseTo(last('MCP').clinical, 5);
+    expect(n.PIP).toBeCloseTo(last('PIP').clinical, 5);
+    expect(n.DIP).toBeCloseTo(last('DIP').clinical, 5);
   });
 });

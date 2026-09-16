@@ -1,6 +1,82 @@
 {
   "source": "WhatsApp Javi/Gorka 2026-09-09 (goniometro)",
-  "generatedAt": "2026-09-09T08:47:39.512Z",
+  "generatedAt": "2026-09-16T10:31:46.858Z",
+  "tables": {
+    "long": {
+      "MCP": [
+        {
+          "raw": -0.43,
+          "clinical": 0
+        },
+        {
+          "raw": 46.32,
+          "clinical": 45
+        },
+        {
+          "raw": 81.09,
+          "clinical": 90
+        }
+      ],
+      "PIP": [
+        {
+          "raw": 1.96,
+          "clinical": 0
+        },
+        {
+          "raw": 24.61,
+          "clinical": 45
+        },
+        {
+          "raw": 70.54,
+          "clinical": 90
+        }
+      ],
+      "DIP": [
+        {
+          "raw": -3.74,
+          "clinical": 0
+        },
+        {
+          "raw": 20.68,
+          "clinical": 45
+        },
+        {
+          "raw": 63.46,
+          "clinical": 90
+        }
+      ]
+    },
+    "pulgar": {
+      "PIP": [
+        {
+          "raw": 4.91,
+          "clinical": 0
+        },
+        {
+          "raw": 41.95,
+          "clinical": 45
+        },
+        {
+          "raw": 63.2,
+          "clinical": 55
+        }
+      ],
+      "DIP": [
+        {
+          "raw": -14.65,
+          "clinical": 0
+        },
+        {
+          "raw": 42.69,
+          "clinical": 45
+        },
+        {
+          "raw": 82.17,
+          "clinical": 80
+        }
+      ]
+    }
+  },
   "samples": [
     {
       "file": "indice-MCP-000.png",
@@ -12,8 +88,9 @@
       "height": 320,
       "libJoint": "MCP",
       "attempt": "upscaled",
-      "raw": -15.51891383756389,
+      "raw": -0.4250644545880606,
       "handedness": "Right",
+      "viewSide": "radial",
       "hasLandmarks": true
     },
     {
@@ -26,8 +103,9 @@
       "height": 256,
       "libJoint": "MCP",
       "attempt": "upscaled",
-      "raw": 54.69788844749795,
+      "raw": 46.324574860874236,
       "handedness": "Right",
+      "viewSide": "radial",
       "hasLandmarks": true
     },
     {
@@ -40,8 +118,9 @@
       "height": 252,
       "libJoint": "MCP",
       "attempt": "upscaled",
-      "raw": 75.22168142238006,
+      "raw": 81.09460115713806,
       "handedness": "Right",
+      "viewSide": "radial",
       "hasLandmarks": true
     },
     {
@@ -54,8 +133,9 @@
       "height": 310,
       "libJoint": "PIP",
       "attempt": "upscaled",
-      "raw": 2.6659431146925168,
+      "raw": 1.9633479066023516,
       "handedness": "Right",
+      "viewSide": "radial",
       "hasLandmarks": true
     },
     {
@@ -68,8 +148,9 @@
       "height": 274,
       "libJoint": "PIP",
       "attempt": "upscaled",
-      "raw": 27.70466231356577,
+      "raw": 24.614875267598872,
       "handedness": "Right",
+      "viewSide": "radial",
       "hasLandmarks": true
     },
     {
@@ -82,8 +163,9 @@
       "height": 284,
       "libJoint": "PIP",
       "attempt": "upscaled",
-      "raw": 71.2545690461643,
+      "raw": 70.54435382803253,
       "handedness": "Right",
+      "viewSide": "radial",
       "hasLandmarks": true
     },
     {
@@ -96,8 +178,9 @@
       "height": 238,
       "libJoint": "DIP",
       "attempt": "upscaled",
-      "raw": -6.216169702212581,
+      "raw": -3.7380011522925827,
       "handedness": "Right",
+      "viewSide": "radial",
       "hasLandmarks": true
     },
     {
@@ -110,8 +193,9 @@
       "height": 264,
       "libJoint": "DIP",
       "attempt": "upscaled",
-      "raw": 23.175448402445255,
+      "raw": 20.683580769293307,
       "handedness": "Right",
+      "viewSide": "radial",
       "hasLandmarks": true
     },
     {
@@ -124,8 +208,9 @@
       "height": 261,
       "libJoint": "DIP",
       "attempt": "upscaled",
-      "raw": 61.822916253399,
+      "raw": 63.45662667512202,
       "handedness": "Right",
+      "viewSide": "radial",
       "hasLandmarks": true
     },
     {
@@ -138,8 +223,9 @@
       "height": 197,
       "libJoint": "PIP",
       "attempt": "upscaled",
-      "raw": 8.177138683122456,
+      "raw": 4.910930584014249,
       "handedness": "Right",
+      "viewSide": null,
       "hasLandmarks": true
     },
     {
@@ -152,8 +238,9 @@
       "height": 194,
       "libJoint": "PIP",
       "attempt": "upscaled",
-      "raw": 52.04154266289644,
+      "raw": 41.94649731319107,
       "handedness": "Right",
+      "viewSide": null,
       "hasLandmarks": true
     },
     {
@@ -166,8 +253,9 @@
       "height": 217,
       "libJoint": "PIP",
       "attempt": "upscaled",
-      "raw": 77.10266836302945,
+      "raw": 63.20392843875349,
       "handedness": "Right",
+      "viewSide": null,
       "hasLandmarks": true
     },
     {
@@ -180,8 +268,9 @@
       "height": 213,
       "libJoint": "DIP",
       "attempt": "upscaled",
-      "raw": -23.10585867225258,
+      "raw": -14.651756980445539,
       "handedness": "Right",
+      "viewSide": null,
       "hasLandmarks": true
     },
     {
@@ -194,8 +283,9 @@
       "height": 196,
       "libJoint": "DIP",
       "attempt": "upscaled",
-      "raw": 60.31501744761271,
+      "raw": 42.691958898908446,
       "handedness": "Right",
+      "viewSide": null,
       "hasLandmarks": true
     },
     {
@@ -208,61 +298,12 @@
       "height": 196,
       "libJoint": "DIP",
       "attempt": "upscaled",
-      "raw": 77.21959032770535,
+      "raw": 82.17020963952828,
       "handedness": "Right",
+      "viewSide": null,
       "hasLandmarks": true
     }
   ],
-  "fits": {
-    "MCP": {
-      "m": 0.9016964753498847,
-      "b": 10.615110559315944,
-      "r2": 0.9091163879671325,
-      "residuals": [
-        3.3782393492739686,
-        -14.936003781506024,
-        11.557764432232062
-      ],
-      "meanAbsError": 9.957335854337352,
-      "maxAbsError": 14.936003781506024,
-      "measuredOpen": -11.772376680519871,
-      "measuredClosed": 88.0394807020626,
-      "clinicalMax": 90,
-      "n": 3
-    },
-    "PIP": {
-      "m": 1.2810670070886656,
-      "b": 1.6037806303959954,
-      "r2": 0.9762958415817177,
-      "residuals": [
-        -5.019032397403773,
-        7.9046905371621605,
-        -2.885658139758391
-      ],
-      "meanAbsError": 5.269793691441442,
-      "maxAbsError": 7.9046905371621605,
-      "measuredOpen": -1.251910026190374,
-      "measuredClosed": 76.80801927232349,
-      "clinicalMax": 100,
-      "n": 3
-    },
-    "DIP": {
-      "m": 1.3146593397348227,
-      "b": 10.476083866466162,
-      "r2": 0.9938691090951685,
-      "residuals": [
-        -2.3039383100757593,
-        4.0560964387167076,
-        -1.7521581286409287
-      ],
-      "meanAbsError": 2.7040642924777987,
-      "maxAbsError": 4.0560964387167076,
-      "measuredOpen": -7.968668041851261,
-      "measuredClosed": 52.88359807914754,
-      "clinicalMax": 80,
-      "n": 3
-    }
-  },
   "landmarks": {
     "indice-MCP-000.png": [
       {

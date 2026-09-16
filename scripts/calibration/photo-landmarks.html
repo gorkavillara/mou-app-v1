@@ -95,9 +95,17 @@ window.__detect = async (url, scale = 3) => {
       return { x: px / W, y: py / H, z: p.z, visibility: p.visibility };
     };
 
+    // World landmarks are metric 3D about the hand centre: aspect-free, so only
+    // the mirror retry needs undoing (negate x).
+    const world = (r.worldLandmarks ?? [])[0]?.map((p) => ({ x: a.flip ? -p.x : p.x, y: p.y, z: p.z })) ?? null;
+
     return {
       attempt: a.name,
       landmarks: r.landmarks[0].map(map),
+      worldLandmarks: world,
+      // MediaPipe's z is on the scale of the detected canvas WIDTH; the pixel
+      // geometry needs it on the same scale as the original image's pixels.
+      zPixelScale: cw / scale,
       handedness: (r.handedness ?? r.handednesses ?? [])[0]?.[0] ?? null,
       imageW: img.naturalWidth,
       imageH: img.naturalHeight,

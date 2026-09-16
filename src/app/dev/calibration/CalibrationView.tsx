@@ -3,13 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FINGERS,
-  JOINT_CALIBRATION,
   calculateAllJointAngles,
   calculateJointAngles,
+  calibrationFor,
   drawHand,
   normalizeJointAngle,
   readViewSide,
+  toImagePixels,
   DEFAULT_FINGER_STATUS,
+  type CalibrationPoint,
   type FingerConfig,
   type FingerJointAngles,
   type FingerName,
@@ -36,8 +38,9 @@ import {
  *     see the tool measures where he places the goniometer.
  *  3. Multi-point goniometer-referenced capture: the operator measures the real
  *     clinical angle with a physical goniometer, types it in, and captures the
- *     pair { raw, clinical }. A least-squares line over the points yields
- *     measuredOpen / measuredClosed for that joint's JOINT_CALIBRATION entry.
+ *     pair { raw, clinical }. The captured points become the piecewise-linear
+ *     `points` table pasted straight into that joint's `JOINT_CALIBRATION` (or
+ *     `THUMB_CALIBRATION` for the thumb) entry — no line fitting involved.
  *
  * CHIRALITY (2026-09-09). Every angle read here passes the detected MediaPipe
  * handedness into `calculateJointAngles`. Without it the sign of the reading
@@ -119,16 +122,17 @@ const JOINT_META: Record<TargetJoint, JointMeta> = {
 };
 
 /**
- * Clinical bounds come from `JOINT_CALIBRATION` — the same table the export is
+ * Clinical bounds come from `calibrationFor` — the same table the export is
  * pasted back into — instead of being duplicated here. Hardcoding them once
- * meant the tool could only ever speak about the MCP's 0–90° range.
+ * meant the tool could only ever speak about the MCP's 0–90° range. Finger is
+ * needed because the thumb has its own table (`THUMB_CALIBRATION`).
  */
-function clinicalMaxOf(joint: TargetJoint): number {
-  return JOINT_CALIBRATION[joint].clinicalMax;
+function clinicalMaxOf(joint: TargetJoint, finger: FingerName): number {
+  return calibrationFor(joint, finger).clinicalMax;
 }
 
-function clinicalMinOf(joint: TargetJoint): number {
-  return JOINT_CALIBRATION[joint].clinicalMin ?? 0;
+function clinicalMinOf(joint: TargetJoint, finger: FingerName): number {
+  return calibrationFor(joint, finger).clinicalMin ?? 0;
 }
 
 /**
@@ -218,16 +222,19 @@ type ProcessedPhoto = {
   clinicalInput: string;
 };
 
-/** Result of the least-squares fit `clinical = m·raw + b`. */
+/**
+ * Result of an INFORMATIVE least-squares fit `clinical = m·raw + b` over the
+ * captured points. This is NOT what gets pasted into the calibration anymore
+ * (see `buildCalibrationTable` / `buildCalibrationJson`) — MediaPipe's raw
+ * reading is not linear in the real angle, so a single line missed the
+ * surgeon's own photos by up to 14.9°. R²/max error are kept only as a sanity
+ * signal for how far the joint is from linear.
+ */
 type LinearFit =
   | {
       ok: true;
       slope: number;
       intercept: number;
-      /** raw where clinical = 0 → measuredOpen. */
-      measuredOpen: number;
-      /** raw where clinical = clinicalMax of the joint → measuredClosed. */
-      measuredClosed: number;
       /** Coefficient of determination, 0..1 (1 for the exact 2-point line). */
       r2: number;
       /** Largest absolute residual in clinical degrees. */
@@ -377,12 +384,13 @@ function drawJointOverlay(
 }
 
 /**
- * Least-squares fit `clinical = m·raw + b` over the captured points. With
- * exactly 2 points this is the line through them (R² = 1). Returns a degenerate
- * marker (`ok:false`) when there are <2 points or the slope is non-positive
- * (which would invert the calibration and break normalization downstream).
+ * INFORMATIVE least-squares fit `clinical = m·raw + b` over the captured
+ * points — a quick sanity read on how far the joint is from linear, kept
+ * alongside the real (piecewise) table below. Returns a degenerate marker
+ * (`ok:false`) when there are <2 points or the slope is non-positive (which
+ * would mean the raw doesn't grow with the clinical angle at all).
  */
-function fitLinear(points: CapturePoint[], clinicalMax: number): LinearFit {
+function fitLinear(points: CapturePoint[]): LinearFit {
   if (points.length < 2) {
     return { ok: false, reason: 'Captura al menos 2 puntos para calcular el ajuste.' };
   }
@@ -429,29 +437,73 @@ function fitLinear(points: CapturePoint[], clinicalMax: number): LinearFit {
   }
   const r2 = ssTot === 0 ? 1 : Math.max(0, 1 - ssRes / ssTot);
 
-  const measuredOpen = -intercept / slope; // raw at clinical = 0
-  // raw at clinical = clinicalMax (90 MCP / 100 PIP / 80 DIP).
-  const measuredClosed = (clinicalMax - intercept) / slope;
-
-  return {
-    ok: true,
-    slope,
-    intercept,
-    measuredOpen,
-    measuredClosed,
-    r2,
-    maxError,
-  };
+  return { ok: true, slope, intercept, r2, maxError };
 }
 
-/** Line ready to paste into `JOINT_CALIBRATION` for the calibrated joint. */
-function buildJointJson(joint: TargetJoint, fit: LinearFit): string {
-  if (!fit.ok) {
-    return `// ${fit.reason}`;
+/**
+ * Result of collapsing the captured points into the piecewise-linear table
+ * that actually gets pasted into `JOINT_CALIBRATION`/`THUMB_CALIBRATION`.
+ */
+type CalibrationTableResult =
+  | { ok: true; points: CalibrationPoint[]; capturedCount: number }
+  | { ok: false; reason: string };
+
+/**
+ * Builds the `points` table for the joint's calibration entry: one
+ * `{ raw, clinical }` per distinct clinical angle captured, averaging the raw
+ * reading when the same clinical angle was captured more than once, sorted by
+ * clinical. Flags the table as unusable (`ok:false`) when the raw does not
+ * come out strictly increasing — `normalizeJointAngle` would silently return 0
+ * on a table like that (see its guard).
+ */
+function buildCalibrationTable(points: CapturePoint[]): CalibrationTableResult {
+  if (points.length < 2) {
+    return { ok: false, reason: 'Captura al menos 2 puntos para construir la tabla.' };
   }
-  return `${joint}: { measuredOpen: ${round1(fit.measuredOpen)}, measuredClosed: ${round1(
-    fit.measuredClosed,
-  )}, clinicalMax: ${clinicalMaxOf(joint)}, clinicalMin: ${clinicalMinOf(joint)} },`;
+  const groups = new Map<number, { rawSum: number; count: number }>();
+  for (const p of points) {
+    const key = round1(p.clinical);
+    const g = groups.get(key) ?? { rawSum: 0, count: 0 };
+    g.rawSum += p.raw;
+    g.count += 1;
+    groups.set(key, g);
+  }
+  const table: CalibrationPoint[] = Array.from(groups.entries())
+    .map(([clinical, g]) => ({ clinical, raw: g.rawSum / g.count }))
+    .sort((a, b) => a.clinical - b.clinical);
+
+  if (table.length < 2) {
+    return {
+      ok: false,
+      reason: 'Necesitas al menos 2 ángulos clínicos DISTINTOS (todos los puntos capturados comparten el mismo).',
+    };
+  }
+  for (let i = 1; i < table.length; i++) {
+    if (!(table[i].raw > table[i - 1].raw)) {
+      return {
+        ok: false,
+        reason: `El crudo no crece entre ${table[i - 1].clinical}° y ${table[i].clinical}° clínicos (tabla inutilizable: normalizeJointAngle devolvería 0). Repite esas dos capturas — revisa mano de perfil / quiralidad.`,
+      };
+    }
+  }
+  return { ok: true, points: table, capturedCount: points.length };
+}
+
+/** Block ready to paste into `JOINT_CALIBRATION` or `THUMB_CALIBRATION` for the calibrated joint. */
+function buildCalibrationJson(
+  joint: TargetJoint,
+  constantName: 'JOINT_CALIBRATION' | 'THUMB_CALIBRATION',
+  table: CalibrationTableResult,
+  clinicalMax: number,
+  clinicalMin: number,
+): string {
+  if (!table.ok) {
+    return `// ${table.reason}`;
+  }
+  const pointsStr = table.points
+    .map((p) => `{ raw: ${round1(p.raw)}, clinical: ${round1(p.clinical)} }`)
+    .join(', ');
+  return `// Pega en ${constantName}.${joint}\n${joint}: { points: [${pointsStr}], clinicalMax: ${clinicalMax}, clinicalMin: ${clinicalMin} },`;
 }
 
 /** Loads a File into a decoded HTMLImageElement (rejects on decode error). */
@@ -610,19 +662,25 @@ export function CalibrationView() {
       };
       liveVisibilityRef.current = avgVisibility(hand);
 
+      const videoW = video.videoWidth || rect.width;
+      const videoH = video.videoHeight || rect.height;
+
+      // `calculateAllJointAngles`/`readViewSide` require image-pixel landmarks
+      // (see `toImagePixels`) — running them on the normalised 0..1 landmarks
+      // bends every angle on a non-square video. Drawing keeps using the
+      // normalised `hand` below; only the angle math goes through `handPx`.
+      const handPx = toImagePixels(hand, videoW, videoH);
+
       // Chirality and view side MUST travel with the landmarks: the flexion
       // sign is measured in image space and flips when the projected hand is
       // mirrored or shown from the other edge, so a reading taken without them
       // is not a clinical quantity (see `flexionSignFor`).
       const all: FingerJointAngles = calculateAllJointAngles(
-        hand,
+        handPx,
         chirality,
-        readViewSide(hand) ?? undefined,
+        readViewSide(handPx) ?? undefined,
       );
       liveFingerJointsRef.current = all;
-
-      const videoW = video.videoWidth || rect.width;
-      const videoH = video.videoHeight || rect.height;
 
       if (showLandmarksRef.current) {
         const fingerAnglesForDraw = {
@@ -852,11 +910,14 @@ export function CalibrationView() {
               base.chirality = chirality;
               base.imageW = img.naturalWidth;
               base.imageH = img.naturalHeight;
+              // Same image-pixel requirement as the live loop: convert with the
+              // photo's own natural size before measuring the angle.
+              const handPx = toImagePixels(hand, img.naturalWidth, img.naturalHeight);
               base.raw = calculateJointAngles(
-                hand,
+                handPx,
                 cfg,
                 chirality,
-                readViewSide(hand) ?? undefined,
+                readViewSide(handPx) ?? undefined,
               )[joint];
             }
           } catch {
@@ -909,11 +970,20 @@ export function CalibrationView() {
   );
 
   const jointMeta = JOINT_META[targetJoint];
-  const clinicalMax = clinicalMaxOf(targetJoint);
-  const clinicalMin = clinicalMinOf(targetJoint);
+  const clinicalMax = clinicalMaxOf(targetJoint, targetFinger);
+  const clinicalMin = clinicalMinOf(targetJoint, targetFinger);
+  const calibrationConstantName: 'JOINT_CALIBRATION' | 'THUMB_CALIBRATION' =
+    targetFinger === 'pulgar' ? 'THUMB_CALIBRATION' : 'JOINT_CALIBRATION';
 
-  const fit = useMemo(() => fitLinear(points, clinicalMax), [points, clinicalMax]);
-  const json = buildJointJson(targetJoint, fit);
+  const fit = useMemo(() => fitLinear(points), [points]);
+  const calibrationTable = useMemo(() => buildCalibrationTable(points), [points]);
+  const json = buildCalibrationJson(
+    targetJoint,
+    calibrationConstantName,
+    calibrationTable,
+    clinicalMax,
+    clinicalMin,
+  );
   void tick; // referenced to keep the panel reactive at ~10Hz
 
   // ----- read-outs (computed each render from refs, ~10Hz) -----
@@ -930,7 +1000,9 @@ export function CalibrationView() {
   const targetConfig = FINGERS.find((f) => f.name === targetFinger)!;
   const targetRaw = live?.[targetFinger]?.[targetJoint];
   const targetNorm =
-    typeof targetRaw === 'number' ? normalizeJointAngle(targetRaw, targetJoint) : null;
+    typeof targetRaw === 'number'
+      ? normalizeJointAngle(targetRaw, targetJoint, targetFinger)
+      : null;
 
   return (
     <main className="min-h-screen bg-gray-50 text-gray-900">
@@ -1151,7 +1223,9 @@ export function CalibrationView() {
               goniómetro, escribe ese ángulo clínico (grados, admite negativos
               p.ej. hiperextensión) y pulsa <strong>Capturar punto</strong>.
               Captura al menos 2 posiciones bien separadas (extensión ≈0° y
-              flexión ≈{clinicalMax}°), idealmente 3+.
+              flexión ≈{clinicalMax}°), idealmente 3+: cada ángulo clínico
+              distinto que captures pasa a formar parte de la tabla de
+              calibración tal cual (no se ajusta una recta).
             </p>
             <div className="mt-3 flex items-end gap-2">
               <label className="flex-1">
@@ -1179,16 +1253,31 @@ export function CalibrationView() {
             {/* Captured points list */}
             {points.length > 0 ? (
               <div className="mt-3">
-                <div className="grid grid-cols-[auto_1fr_1fr_auto_auto] items-center gap-x-3 gap-y-1 font-mono text-[12px]">
+                <div className="grid grid-cols-[auto_1fr_1fr_1fr_auto_auto] items-center gap-x-3 gap-y-1 font-mono text-[12px]">
                   <span className="font-semibold text-gray-500">#</span>
                   <span className="text-right font-semibold text-gray-500">raw</span>
                   <span className="text-right font-semibold text-gray-500">clínico</span>
+                  <span className="text-right font-semibold text-gray-500">actual (código)</span>
                   <span className="font-semibold text-gray-500">origen</span>
                   <span />
                   {points.map((p, i) => (
-                    <PointRow key={p.id} index={i + 1} point={p} onRemove={() => removePoint(p.id)} />
+                    <PointRow
+                      key={p.id}
+                      index={i + 1}
+                      point={p}
+                      joint={targetJoint}
+                      finger={targetFinger}
+                      onRemove={() => removePoint(p.id)}
+                    />
                   ))}
                 </div>
+                <p className="mt-1 text-[11px] text-gray-500">
+                  &quot;Actual (código)&quot; es lo que{' '}
+                  <code className="text-[10px]">normalizeJointAngle(raw, {targetJoint}
+                  {targetFinger === 'pulgar' ? ", 'pulgar'" : ''})</code> devuelve HOY con la
+                  tabla ya publicada — compáralo contra la columna clínico
+                  (goniómetro) para ver si esta captura ya está cubierta.
+                </p>
                 <button
                   type="button"
                   onClick={() => setPoints([])}
@@ -1201,20 +1290,25 @@ export function CalibrationView() {
               <p className="mt-3 text-[12px] text-gray-400">Sin puntos capturados todavía.</p>
             )}
 
-            {/* Fit quality */}
+            {/* Fit quality — informative only, NOT what gets pasted */}
             {fit.ok ? (
-              <div className="mt-3 grid grid-cols-2 gap-2 text-[12px]">
-                <div className="rounded-lg bg-gray-50 p-2">
-                  <span className="text-gray-500">R²</span>{' '}
-                  <span className="font-mono font-semibold tabular-nums">
-                    {fit.r2.toFixed(4)}
-                  </span>
-                </div>
-                <div className="rounded-lg bg-gray-50 p-2">
-                  <span className="text-gray-500">Error máx.</span>{' '}
-                  <span className="font-mono font-semibold tabular-nums">
-                    {fit.maxError.toFixed(1)}°
-                  </span>
+              <div className="mt-3">
+                <p className="text-[11px] text-gray-500">
+                  Ajuste lineal (sólo informativo — no es lo que se pega):
+                </p>
+                <div className="mt-1 grid grid-cols-2 gap-2 text-[12px]">
+                  <div className="rounded-lg bg-gray-50 p-2">
+                    <span className="text-gray-500">R²</span>{' '}
+                    <span className="font-mono font-semibold tabular-nums">
+                      {fit.r2.toFixed(4)}
+                    </span>
+                  </div>
+                  <div className="rounded-lg bg-gray-50 p-2">
+                    <span className="text-gray-500">Error máx.</span>{' '}
+                    <span className="font-mono font-semibold tabular-nums">
+                      {fit.maxError.toFixed(1)}°
+                    </span>
+                  </div>
                 </div>
               </div>
             ) : points.length >= 2 ? (
@@ -1223,9 +1317,27 @@ export function CalibrationView() {
               </p>
             ) : null}
 
+            {/* Piecewise table status */}
+            {calibrationTable.ok ? (
+              <p className="mt-3 text-[11px] text-gray-500">
+                Tabla de {calibrationTable.points.length} punto(s) construida a
+                partir de {calibrationTable.capturedCount} captura(s)
+                {calibrationTable.points.length !== calibrationTable.capturedCount
+                  ? ' (se ha promediado el crudo cuando coincidía el ángulo clínico)'
+                  : ''}
+                .
+              </p>
+            ) : points.length >= 2 ? (
+              <p className="mt-3 rounded-lg bg-red-50 p-2 text-[12px] text-red-700">
+                {calibrationTable.reason}
+              </p>
+            ) : null}
+
             <p className="mt-3 text-[12px] text-gray-600">
-              Bloque para pegar en <code className="text-[11px]">JOINT_CALIBRATION</code>{' '}
-              (sólo la entrada <strong>{targetJoint}</strong>):
+              Bloque para pegar en{' '}
+              <code className="text-[11px]">{calibrationConstantName}</code>{' '}
+              (sólo la entrada <strong>{targetJoint}</strong>
+              {targetFinger === 'pulgar' ? ' del pulgar' : ''}):
             </p>
             <pre className="mt-1 overflow-auto rounded-lg bg-gray-900 p-3 text-[11px] leading-snug text-emerald-200">
               {json}
@@ -1360,18 +1472,35 @@ function FingerJointsRow({
 function PointRow({
   index,
   point,
+  joint,
+  finger,
   onRemove,
 }: {
   index: number;
   point: CapturePoint;
+  /** Joint/finger used to compute the "actual (código)" column against the CURRENT calibration. */
+  joint: TargetJoint;
+  finger: FingerName;
   onRemove: () => void;
 }) {
   const isPhoto = point.source === 'photo';
+  const currentNormalized = normalizeJointAngle(point.raw, joint, finger);
+  // Flag when the calibration already published diverges noticeably from
+  // this goniometer reading — helps spot which captures are already covered.
+  const diverges = Math.abs(currentNormalized - point.clinical) > 5;
   return (
     <>
       <span className="text-gray-500">{index}</span>
       <span className="text-right tabular-nums text-gray-700">{point.raw.toFixed(1)}°</span>
       <span className="text-right tabular-nums text-gray-900">{point.clinical.toFixed(1)}°</span>
+      <span
+        className={
+          'text-right tabular-nums ' + (diverges ? 'font-semibold text-amber-600' : 'text-gray-400')
+        }
+        title="Lo que normalizeJointAngle devuelve HOY con la tabla ya publicada."
+      >
+        {currentNormalized.toFixed(1)}°
+      </span>
       <span
         className={
           'rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ' +
