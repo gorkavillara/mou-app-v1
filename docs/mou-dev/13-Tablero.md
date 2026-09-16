@@ -31,6 +31,8 @@ mou-board-version: 1
 
 ## 🧪 En revisión
 
+- [ ] **IA-23** [P0] Bug de **lado de la mano** en el signo de flexión (sesión de Javi en iPhone 2026-09-14: índice recto → 28°, MCP a 90° → −30°). IA-18 anclaba el signo sólo a la handedness, pero enseñar la misma mano por el canto del meñique (ulnar) en vez del pulgar (radial) invierte el giro 2D sin cambiar la etiqueta. Fix: `readViewSide()` por profundidad de los nudillos 5/17 + `flexionSignFor(chirality, viewSide)` + seguimiento con histéresis en la sesión; calibración re-ejecutada sin cambios. **Falta**: que Javi lo valide en el iPhone y un set de fotos de goniómetro por el lado ulnar (ver [[12-Convencion-angular]]) #ia
+- [ ] **F-22** [P1] **Quitar el desenfocado del fondo** en la sesión del paciente (petición de Javi 2026-09-14): el vídeo se ve nítido y sin recorte elíptico. Revierte la parte visual de PRIV-2; el vídeo sigue sin grabarse ni transmitirse (PRIV-1) #frontend
 
 
 ## ✅ Hecho
@@ -41,7 +43,7 @@ mou-board-version: 1
 - [x] **OPS-6** [P0] E2E de **sesión de medición real**: cámara falsa que pinta las fotos de goniómetro (`tests/patient/fake-camera.ts`) → MediaPipe detecta mano de verdad, se calculan ángulos, se normalizan, la histéresis cuenta repeticiones, la sesión llega a `done` y POSTea, y el doctor la lee de vuelta. Hasta ahora **ningún test tocaba el pipeline de medición** (los specs paran en la intro), que es justo lo que el cirujano juzga. Además es el guardián de regresión de IA-18: con el signo invertido un puño normaliza a −30° y el test falla ✓ 2026-09-09 #infra #ia
 - [x] **IA-22** [P0] Herramienta `/dev/calibration` extendida a **PIP y DIP** (antes sólo MCP): selector de articulación, overlay que dibuja los dos segmentos y el arco del vértice de la articulación elegida, límites clínicos leídos de `JOINT_CALIBRATION` (90/100/80) y invalidación de puntos al cambiar de dedo **o** de articulación. Quiralidad cableada en vídeo y en modo foto, con aviso si no hay handedness utilizable (los puntos no serían comparables). `h1` estable «Calibración articular (IA-04)» + spec e2e actualizado ✓ 2026-09-09 #ia #frontend
 - [x] **IA-17** [P0] Interfaz de calibración MCP rehecha: por dedo, overlay metacarpiano/falange/arco, captura multipunto goniómetro-referenciada (ajuste lineal + R²/error) y **calibración por foto** (subir fotos de Javi → MediaPipe modo imagen → mismo ajuste). Geometría OK; recalibración con datos reales pendiente de OPS-1 ✓ 2026-06-15 #ia
-- [x] **PRIV-2** Privacidad de la cámara: fondo difuminado (CSS) con ventana nítida de la mano (recorte elíptico del frame crudo) + recordatorio persistente "mano de perfil" en la sesión ✓ 2026-06-15 #frontend
+- [x] **PRIV-2** Privacidad de la cámara: fondo difuminado (CSS) con ventana nítida de la mano (recorte elíptico del frame crudo) + recordatorio persistente "mano de perfil" en la sesión ✓ 2026-06-15 — **desenfocado retirado 2026-09-16 (F-22)**, se mantiene el recordatorio #frontend
 - [x] **B-20** [P0] FB-3: migración `rep_measurements.finger` (nullable + check 5 dedos); `amputated_fingers` deprecada ✓ 2026-06-15 #backend #infra
 - [x] **B-21** [P0] FB-3: `patient_progression` agrupa por `(día, articulación, dedo)`, retrocompat `finger NULL` ✓ 2026-06-15 #backend
 - [x] **B-22** [P0] FB-3: `POST sessions` acepta `finger`; CSV export con columna `finger` ✓ 2026-06-15 #backend
