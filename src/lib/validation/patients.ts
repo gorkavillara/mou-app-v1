@@ -144,6 +144,8 @@ export type CreatePatientInput = z.infer<typeof createPatientSchema>;
  *   - `amputated_fingers`: FingerName[] (FULL REPLACEMENT; send `[]` to clear)
  *   - `surgery_date`:      YYYY-MM-DD | null (UX-5; null clears)
  *   - `surgery_note`:      1..120 chars | null (UX-5; null clears)
+ *   - `pathology_code`:    'flexor' | 'extensor' | 'otros' | null (GORA-12;
+ *                          null clears). Same enum as the DB CHECK.
  *
  * Every field is `.optional()` so partial updates work, but `.refine` rejects
  * `{}` (at least one key required) — a no-op PATCH is a client mistake (400).
@@ -160,6 +162,7 @@ export const patchPatientSchema = z
     amputated_fingers: fingerArraySchema.optional(),
     surgery_date: isoCalendarDate.nullable().optional(),
     surgery_note: surgeryNoteSchema.nullable().optional(),
+    pathology_code: z.enum(['flexor', 'extensor', 'otros']).nullable().optional(),
   })
   .strict()
   .refine((body) => Object.keys(body).length > 0, {

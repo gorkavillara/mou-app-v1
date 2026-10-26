@@ -122,11 +122,12 @@ export async function GET(
  *
  * Updates a non-empty subset of the clinical-record fields:
  *   { injured_fingers?: FingerName[], amputated_fingers?: FingerName[],
- *     surgery_date?: 'YYYY-MM-DD'|null, surgery_note?: string|null }
+ *     surgery_date?: 'YYYY-MM-DD'|null, surgery_note?: string|null,
+ *     pathology_code?: 'flexor'|'extensor'|'otros'|null }
  *
  * Arrays are FULL REPLACEMENT (send `[]` to clear — no null for arrays). For
- * dates/notes, `null` clears. At least one key is required (`{}` → 400, enforced
- * by the schema's refine). Strict Zod rejects any other field, including the
+ * dates/notes/pathology, `null` clears. At least one key is required (`{}` →
+ * 400, enforced by the schema's refine). Strict Zod rejects any other field, including the
  * legacy `injured_finger` (D3). Only the keys present in the body are written,
  * so a PATCH never clobbers a field the caller didn't mention.
  *
@@ -175,12 +176,14 @@ export async function PATCH(
     amputated_fingers?: typeof body.amputated_fingers;
     surgery_date?: typeof body.surgery_date;
     surgery_note?: typeof body.surgery_note;
+    pathology_code?: typeof body.pathology_code;
   } = {};
   if ('injured_fingers' in body) update.injured_fingers = body.injured_fingers;
   if ('amputated_fingers' in body)
     update.amputated_fingers = body.amputated_fingers;
   if ('surgery_date' in body) update.surgery_date = body.surgery_date;
   if ('surgery_note' in body) update.surgery_note = body.surgery_note;
+  if ('pathology_code' in body) update.pathology_code = body.pathology_code;
 
   // FB-1: single-array overlap check (read-modify-validate). When exactly ONE
   // of the two finger arrays is being changed, validate it against the OTHER
