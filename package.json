@@ -26,14 +26,14 @@
     "@supabase/supabase-js": "^2.98.0",
     "date-fns": "^4.1.0",
     "framer-motion": "^12.31.0",
-    "jspdf": "^4.1.0",
+    "jspdf": "^4.2.1",
     "lucide-react": "^0.563.0",
-    "next": "16.1.6",
+    "next": "16.4.3",
     "qrcode": "^1.5.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "recharts": "^3.7.0",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@playwright/cli": "^0.1.13",
@@ -49,7 +49,7 @@
     "@vitejs/plugin-react": "^5.1.4",
     "dotenv": "^17.3.1",
     "eslint": "^9",
-    "eslint-config-next": "16.1.6",
+    "eslint-config-next": "16.4.3",
     "jsdom": "^28.1.0",
     "pg": "^8.20.0",
     "tailwindcss": "^4",
