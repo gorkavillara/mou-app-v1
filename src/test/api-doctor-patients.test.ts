@@ -946,6 +946,89 @@ describe('PATCH /api/doctor/patients/:id (FB-1)', () => {
     expect(body.error).toBe('invalid_body');
   });
 
+  it('sets pathology_code without touching other fields (GORA-12, 200)', async () => {
+    // pathology-only PATCH skips read-modify-validate (no finger arrays).
+    handlers['patients:update'] = [
+      ({ args }) => {
+        const row = (args[0] ?? {}) as Record<string, unknown>;
+        expect(row).toEqual({ pathology_code: 'extensor' });
+        return {
+          data: {
+            id: 'p1',
+            external_id: 'P-001',
+            pathology_code: 'extensor',
+            injured_fingers: [],
+            amputated_fingers: [],
+            surgery_date: null,
+            surgery_note: null,
+            access_token: 'tok-abc',
+            started_at: '2026-05-01',
+            discharged_at: null,
+            created_at: '2026-05-01T10:00:00Z',
+            updated_at: '2026-05-20T10:00:00Z',
+          },
+          error: null,
+        };
+      },
+    ];
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      { pathology_code: 'extensor' },
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.patient.pathology_code).toBe('extensor');
+  });
+
+  it('clears pathology_code with null (GORA-12, 200)', async () => {
+    handlers['patients:update'] = [
+      ({ args }) => {
+        const row = (args[0] ?? {}) as Record<string, unknown>;
+        expect(row).toEqual({ pathology_code: null });
+        return {
+          data: {
+            id: 'p1',
+            external_id: 'P-001',
+            pathology_code: null,
+            injured_fingers: [],
+            amputated_fingers: [],
+            surgery_date: null,
+            surgery_note: null,
+            access_token: 'tok-abc',
+            started_at: '2026-05-01',
+            discharged_at: null,
+            created_at: '2026-05-01T10:00:00Z',
+            updated_at: '2026-05-20T10:00:00Z',
+          },
+          error: null,
+        };
+      },
+    ];
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      { pathology_code: null },
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.patient.pathology_code).toBeNull();
+  });
+
+  it('400 on invalid pathology_code (GORA-12)', async () => {
+    const req = jsonRequest(
+      'http://localhost:3500/api/doctor/patients/p1',
+      'PATCH',
+      { pathology_code: 'tendon' },
+    );
+    const res = await patchPatient(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('invalid_body');
+  });
+
   it('400 on invalid calendar surgery_date (UX-5)', async () => {
     const req = jsonRequest(
       'http://localhost:3500/api/doctor/patients/p1',

@@ -22,6 +22,7 @@ import { AdherenceBar } from '@/components/doctor/AdherenceBar';
 import { DischargeButton } from '@/components/doctor/DischargeButton';
 import { FingerStatusControl } from '@/components/doctor/FingerStatusControl';
 import { SurgeryControl } from '@/components/doctor/SurgeryControl';
+import { PathologyControl } from '@/components/doctor/PathologyControl';
 import { NewPrescriptionDialog } from '@/components/doctor/NewPrescriptionDialog';
 import { CopyUrlButton, PrintButton } from '@/components/doctor/PatientAccessActions';
 import { PrintableQRSheet } from '@/components/doctor/PrintableQRSheet';
@@ -68,6 +69,7 @@ export default async function PatientDetailPage({ params }: { params: Params }) 
           days={days}
           discharged={discharged}
           patientId={patient.id}
+          pathologyCode={patient.pathology_code}
           injuredFingers={patient.injured_fingers ?? []}
           surgeryDate={patient.surgery_date}
           surgeryNote={patient.surgery_note}
@@ -114,6 +116,7 @@ function Header({
   days,
   discharged,
   patientId,
+  pathologyCode,
   injuredFingers,
   surgeryDate,
   surgeryNote,
@@ -122,6 +125,7 @@ function Header({
   days: number;
   discharged: boolean;
   patientId: string;
+  pathologyCode: PatientDetail['pathology_code'];
   injuredFingers: NonNullable<PatientDetail['injured_fingers']>;
   surgeryDate: PatientDetail['surgery_date'];
   surgeryNote: PatientDetail['surgery_note'];
@@ -144,6 +148,10 @@ function Header({
         <p className="text-sm text-gray-500">
           {days === 0 ? 'alta hoy' : `día ${days} de tratamiento`}
         </p>
+        {/* GORA-12 — pathology code (display + inline edit; null = sin especificar). */}
+        <div className="pt-1">
+          <PathologyControl patientId={patientId} pathologyCode={pathologyCode} />
+        </div>
         {/* FB-3 — injured fingers: badge summary when collapsed + inline N/L editor. */}
         <div className="pt-1">
           <FingerStatusControl patientId={patientId} injuredFingers={injuredFingers} />
