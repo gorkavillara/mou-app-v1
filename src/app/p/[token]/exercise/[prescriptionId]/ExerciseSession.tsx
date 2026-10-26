@@ -275,8 +275,8 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   const [cameraStalled, setCameraStalled] = useState(false);
   const [repCount, setRepCount] = useState(0);
   // IA-11 — expected hand for this session. We have no DB column yet that
-  // tells us which side was operated; the intro phase exposes a toggle so the
-  // patient can flip it before starting. Default to right.
+  // tells us which side was operated and there is no hand selector in the intro
+  // yet, so it is fixed to right until IA-11 wires one.
   const [expectedHand] = useState<'Left' | 'Right'>('Right');
   // IA-09/IA-11 — single-toast queue. We keep it as a "current toast" string
   // (or null) plus a numeric key so re-firing the same text re-triggers the
