@@ -275,9 +275,9 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
   const [cameraStalled, setCameraStalled] = useState(false);
   const [repCount, setRepCount] = useState(0);
   // IA-11 — expected hand for this session. We have no DB column yet that
-  // tells us which side was operated; the intro phase exposes a toggle so the
-  // patient can flip it before starting. Default to right.
-  const [expectedHand, setExpectedHand] = useState<'Left' | 'Right'>('Right');
+  // tells us which side was operated and there is no hand selector in the intro
+  // yet, so it is fixed to right until IA-11 wires one.
+  const [expectedHand] = useState<'Left' | 'Right'>('Right');
   // IA-09/IA-11 — single-toast queue. We keep it as a "current toast" string
   // (or null) plus a numeric key so re-firing the same text re-triggers the
   // dismiss timer.
@@ -340,8 +340,6 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
 
   // IA-11 — handedness sampler. We collect the first N readings where a hand
   // was detected, summarize once, fire one toast if mismatched, and stop.
-  const HANDEDNESS_SAMPLE_TARGET = 5;
-  const HANDEDNESS_MIN_SCORE = 0.7;
   const handednessSamplesRef = useRef<HandednessReading[]>([]);
   const handednessFiredRef = useRef(false);
   const expectedHandRef = useRef<'Left' | 'Right'>('Right');
@@ -843,6 +841,9 @@ export function ExerciseSession({ token, prescription, patient }: Props) {
     }
 
     scheduleNextFrame();
+    // scheduleNextFrame is defined right below and calls back into this loop;
+    // adding it here would be a use-before-define cycle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processLandmarks, fingerStatus, updateChiralityVerdict]);
 
   const scheduleNextFrame = useCallback(() => {

@@ -84,7 +84,7 @@ function formatTooltipDay(day: string): string {
 }
 
 export function ProgressionChart({ data }: Props) {
-  const series = data?.series ?? [];
+  const series = useMemo(() => data?.series ?? [], [data]);
   const hasAnyPoints = series.some((s) => s.points.length > 0);
 
   const { chartData, seriesMeta, hasExtension, yMax, xTickInterval } = useMemo(() => {

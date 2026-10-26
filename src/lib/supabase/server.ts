@@ -1,4 +1,4 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 export async function createSupabaseServerClient() {
@@ -26,7 +26,7 @@ export async function createSupabaseServerClient() {
   )
 }
 
-export async function updateSession(request: Request) {
+export async function updateSession() {
   const supabase = await createSupabaseServerClient()
   
   // This will refresh the session if needed
