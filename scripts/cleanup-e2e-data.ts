@@ -1,6 +1,8 @@
 /**
  * Cleanup helper: deletes accumulated patients/sessions/prescriptions/
- * rep_measurements created by past Playwright runs against the E2E doctor.
+ * rep_measurements created by past Playwright runs against the E2E doctor,
+ * plus the audit_log rows their triggers left behind. Only rows of the E2E
+ * doctor are touched (see cleanup-e2e-statements.ts).
  *
  * Idempotent. Run this when the test DB is bloated and goto times out on the
  * /doctor list because there are 100+ patients.
@@ -11,6 +13,7 @@
 
 import { config } from 'dotenv';
 import { Client } from 'pg';
+import { E2E_CLEANUP_STATEMENTS } from './cleanup-e2e-statements';
 
 config();
 
@@ -51,27 +54,10 @@ async function main() {
 
   await c.query('begin');
   try {
-    await c.query(
-      `delete from public.rep_measurements where session_id in (
-         select s.id from public.sessions s
-         join public.patients p on p.id = s.patient_id
-         where p.doctor_id = $1
-       )`,
-      [doctorId],
-    );
-    await c.query(
-      `delete from public.sessions where patient_id in (
-         select id from public.patients where doctor_id = $1
-       )`,
-      [doctorId],
-    );
-    await c.query(
-      `delete from public.prescriptions where patient_id in (
-         select id from public.patients where doctor_id = $1
-       )`,
-      [doctorId],
-    );
-    await c.query(`delete from public.patients where doctor_id = $1`, [doctorId]);
+    for (const { table, sql } of E2E_CLEANUP_STATEMENTS) {
+      const { rowCount } = await c.query(sql, [doctorId]);
+      console.log(`  ${table}: ${rowCount ?? 0} rows deleted`);
+    }
     await c.query('commit');
   } catch (err) {
     await c.query('rollback');
